@@ -1,16 +1,22 @@
 import * as vscode from 'vscode';
 import { analyzeFile, AnalyzerConfig } from './pythonAnalyzer';
 import { LogpointManager } from './logpointManager';
+import { ExportConfig } from './sasFormatter';
 
 let manager: LogpointManager;
 let log: vscode.OutputChannel;
 
-function getConfig(): AnalyzerConfig & { enabled: boolean } {
+function getConfig(): AnalyzerConfig & { enabled: boolean } & ExportConfig {
   const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+  const sampleOutputFolder = cfg.get<string>('sampleOutputFolder', 'df_samples');
+  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
   return {
     polarsAlias: cfg.get<string>('polarsAlias', 'pl'),
     dfNameSuffixes: cfg.get<string[]>('dfNameSuffixes', ['_df', 'df', '_data']),
     enabled: cfg.get<boolean>('enabled', true),
+    exportSamples: cfg.get<boolean>('exportSamples', true),
+    sampleRows: cfg.get<number>('sampleRows', 1000),
+    outputFolderAbsPath: wsRoot ? vscode.Uri.joinPath(wsRoot, sampleOutputFolder).fsPath : '',
   };
 }
 
@@ -37,7 +43,7 @@ async function syncAllPythonEditors(): Promise<void> {
 
 async function syncDocument(
   document: vscode.TextDocument,
-  config: AnalyzerConfig
+  config: AnalyzerConfig & ExportConfig
 ): Promise<void> {
   const source = document.getText();
   const sourceLines = source.replace(/\r/g, '').split('\n');
@@ -46,7 +52,7 @@ async function syncDocument(
   for (const a of assignments) {
     log.appendLine(`    → ${a.varName} (lines ${a.range.startLine + 1}–${a.range.endLine + 1}), inputs: [${a.inputVars.join(', ')}]`);
   }
-  await manager.syncForFile(document.uri, assignments, sourceLines);
+  await manager.syncForFile(document.uri, assignments, sourceLines, config);
 }
 
 export function activate(context: vscode.ExtensionContext): void {

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DataFrameAssignment } from './pythonAnalyzer';
-import { buildLogMessage } from './sasFormatter';
+import { buildLogMessage, ExportConfig } from './sasFormatter';
 
 /**
  * Find the first executable line at or after `startAt` (0-based).
@@ -27,7 +27,8 @@ export class LogpointManager implements vscode.Disposable {
   async syncForFile(
     uri: vscode.Uri,
     assignments: DataFrameAssignment[],
-    sourceLines: string[]
+    sourceLines: string[],
+    exportConfig?: ExportConfig
   ): Promise<void> {
     this.removeForFile(uri);
 
@@ -43,7 +44,7 @@ export class LogpointManager implements vscode.Disposable {
       // nextExecutableLine skips blanks/comments so we always land on a
       // real Python statement where all assigned variables are in scope.
       const logLine = nextExecutableLine(sourceLines, assignment.range.endLine + 1, maxLine);
-      const logMessage = buildLogMessage(assignment);
+      const logMessage = buildLogMessage(assignment, exportConfig);
 
       const bp = new vscode.SourceBreakpoint(
         new vscode.Location(uri, new vscode.Range(logLine, 0, logLine, 0)),

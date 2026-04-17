@@ -31,7 +31,7 @@ function shapeCols(varName) {
  *   NOTE: The data set result_df has {result_df.shape[0] if ...} observations
  *         and {result_df.shape[1] if ...} variables.
  */
-function buildLogMessage(assignment) {
+function buildLogMessage(assignment, exportConfig) {
     const parts = [];
     parts.push('===DATALOG===');
     parts.push(`Code: ${escapeForLogpoint(assignment.sourceText)}`);
@@ -41,6 +41,16 @@ function buildLogMessage(assignment) {
     parts.push(`NOTE: The data set ${assignment.varName} has ` +
         `${shapeRows(assignment.varName)} observations and ` +
         `${shapeCols(assignment.varName)} variables.`);
+    if (exportConfig?.exportSamples && exportConfig.outputFolderAbsPath) {
+        const absPath = exportConfig.outputFolderAbsPath.replace(/\\/g, '/');
+        const v = assignment.varName;
+        const n = exportConfig.sampleRows;
+        parts.push(`{(lambda _d: (_d.mkdir(parents=True, exist_ok=True), ` +
+            `${v}.head(${n}).write_csv(str(_d / '${v}.csv'))) ` +
+            `and ('→ CSV: ' + str(_d / '${v}.csv')))` +
+            `(__import__('pathlib').Path('${absPath}')) ` +
+            `if hasattr(${v}, 'write_csv') else '→ LazyFrame, skipped'}`);
+    }
     return parts.join(' | ');
 }
 //# sourceMappingURL=sasFormatter.js.map

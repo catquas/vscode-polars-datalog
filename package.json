@@ -41,6 +41,21 @@
           "type": "boolean",
           "default": true,
           "description": "Enable or disable automatic logpoint injection"
+        },
+        "vscode-datalog.exportSamples": {
+          "type": "boolean",
+          "default": true,
+          "description": "Export the top rows of each DataFrame to a CSV file during debugging"
+        },
+        "vscode-datalog.sampleRows": {
+          "type": "number",
+          "default": 1000,
+          "description": "Number of rows to write per DataFrame sample CSV"
+        },
+        "vscode-datalog.sampleOutputFolder": {
+          "type": "string",
+          "default": "df_samples",
+          "description": "Folder name (relative to workspace root) where DataFrame sample CSVs are written"
         }
       }
     }
