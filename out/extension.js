@@ -38,6 +38,7 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const pythonAnalyzer_1 = require("./pythonAnalyzer");
 const logpointManager_1 = require("./logpointManager");
+const outputFilter_1 = require("./outputFilter");
 let manager;
 let log;
 let currentLogFilePath = '';
@@ -177,6 +178,55 @@ function activate(context) {
         }
         await vscode.commands.executeCommand('workbench.view.explorer');
         await vscode.commands.executeCommand('revealInExplorer', folderUri);
+    }));
+    // --- Capture stdout/stderr from Python debug sessions → plog.log ---
+    //
+    // We use a DebugAdapterTrackerFactory to intercept DAP 'output' events.
+    // Only 'stdout' and 'stderr' categories are written; 'console' is skipped
+    // because that is where evaluated logpoint expressions appear — they already
+    // write directly to plog.log via the Python side-effect expression, so
+    // capturing them here would duplicate entries.
+    context.subscriptions.push(vscode.debug.registerDebugAdapterTrackerFactory('*', {
+        createDebugAdapterTracker(session) {
+            if (!isPythonSession(session)) {
+                return undefined;
+            }
+            const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+            if (!wsRoot) {
+                return undefined;
+            }
+            const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+            const logFile = cfg.get('logFile', 'plog.log');
+            if (!logFile) {
+                return undefined;
+            }
+            const logPath = vscode.Uri.joinPath(wsRoot, logFile).fsPath;
+            const filter = new outputFilter_1.TracebackFilter(wsRoot.fsPath);
+            function appendFiltered(text) {
+                if (!text) {
+                    return;
+                }
+                try {
+                    require('fs').appendFileSync(logPath, text);
+                }
+                catch { /* ignore */ }
+            }
+            return {
+                onDidSendMessage(message) {
+                    if (message.type !== 'event' || message.event !== 'output') {
+                        return;
+                    }
+                    const cat = message.body?.category ?? 'stdout';
+                    if (cat !== 'stdout' && cat !== 'stderr') {
+                        return;
+                    }
+                    appendFiltered(filter.feed(message.body?.output ?? ''));
+                },
+                onWillStopSession() {
+                    appendFiltered(filter.flush());
+                },
+            };
+        },
     }));
     context.subscriptions.push(vscode.commands.registerCommand('vscode-datalog.openPlog', async () => {
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;

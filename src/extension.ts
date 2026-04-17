@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { analyzeFile, AnalyzerConfig } from './pythonAnalyzer';
 import { LogpointManager } from './logpointManager';
 import { ExportConfig } from './sasFormatter';
+import { TracebackFilter } from './outputFilter';
 
 // Available at runtime in VS Code's Node.js extension host; not in @types/vscode
 declare function require(id: string): any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -176,6 +177,49 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       await vscode.commands.executeCommand('workbench.view.explorer');
       await vscode.commands.executeCommand('revealInExplorer', folderUri);
+    })
+  );
+
+  // --- Capture stdout/stderr from Python debug sessions → plog.log ---
+  //
+  // We use a DebugAdapterTrackerFactory to intercept DAP 'output' events.
+  // Only 'stdout' and 'stderr' categories are written; 'console' is skipped
+  // because that is where evaluated logpoint expressions appear — they already
+  // write directly to plog.log via the Python side-effect expression, so
+  // capturing them here would duplicate entries.
+
+  context.subscriptions.push(
+    vscode.debug.registerDebugAdapterTrackerFactory('*', {
+      createDebugAdapterTracker(session: vscode.DebugSession) {
+        if (!isPythonSession(session)) { return undefined; }
+
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (!wsRoot) { return undefined; }
+
+        const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+        const logFile = cfg.get<string>('logFile', 'plog.log');
+        if (!logFile) { return undefined; }
+        const logPath = vscode.Uri.joinPath(wsRoot, logFile).fsPath;
+
+        const filter = new TracebackFilter(wsRoot.fsPath);
+
+        function appendFiltered(text: string): void {
+          if (!text) { return; }
+          try { require('fs').appendFileSync(logPath, text); } catch { /* ignore */ }
+        }
+
+        return {
+          onDidSendMessage(message: { type: string; event?: string; body?: { category?: string; output?: string } }): void {
+            if (message.type !== 'event' || message.event !== 'output') { return; }
+            const cat = message.body?.category ?? 'stdout';
+            if (cat !== 'stdout' && cat !== 'stderr') { return; }
+            appendFiltered(filter.feed(message.body?.output ?? ''));
+          },
+          onWillStopSession(): void {
+            appendFiltered(filter.flush());
+          },
+        };
+      },
     })
   );
 
