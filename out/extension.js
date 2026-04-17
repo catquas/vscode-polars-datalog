@@ -40,11 +40,33 @@ const pythonAnalyzer_1 = require("./pythonAnalyzer");
 const logpointManager_1 = require("./logpointManager");
 let manager;
 let log;
+let currentLogFilePath = '';
+/** Write to both the Output Channel and plog.log (fire-and-forget for the file). */
+function logLine(text) {
+    log.appendLine(text);
+    if (!currentLogFilePath) {
+        return;
+    }
+    try {
+        // require is available at runtime in VS Code's CommonJS extension host
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('fs').appendFileSync(currentLogFilePath, text + '\n');
+    }
+    catch { /* ignore write errors */ }
+}
+function resolveLogFilePath() {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!wsRoot) {
+        return '';
+    }
+    const logFile = vscode.workspace.getConfiguration('vscode-datalog').get('logFile', 'plog.log');
+    return logFile ? vscode.Uri.joinPath(wsRoot, logFile).fsPath : '';
+}
 function getConfig() {
     const cfg = vscode.workspace.getConfiguration('vscode-datalog');
     const sampleOutputFolder = cfg.get('sampleOutputFolder', 'worklib');
-    const logFile = cfg.get('logFile', 'plog.log');
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    currentLogFilePath = resolveLogFilePath();
     return {
         polarsAlias: cfg.get('polarsAlias', 'pl'),
         dfNameSuffixes: cfg.get('dfNameSuffixes', ['_df', 'df', '_data']),
@@ -52,7 +74,7 @@ function getConfig() {
         exportSamples: cfg.get('exportSamples', true),
         sampleRows: cfg.get('sampleRows', 1000),
         outputFolderAbsPath: wsRoot ? vscode.Uri.joinPath(wsRoot, sampleOutputFolder).fsPath : '',
-        logFileAbsPath: wsRoot && logFile ? vscode.Uri.joinPath(wsRoot, logFile).fsPath : '',
+        logFileAbsPath: currentLogFilePath,
     };
 }
 function isPythonSession(session) {
@@ -61,11 +83,11 @@ function isPythonSession(session) {
 async function syncAllPythonEditors() {
     const config = getConfig();
     if (!config.enabled) {
-        log.appendLine('Skipping sync — extension is disabled in settings.');
+        logLine('Skipping sync — extension is disabled in settings.');
         return;
     }
     const editors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === 'python');
-    log.appendLine(`Visible Python editors: ${editors.length}`);
+    logLine(`Visible Python editors: ${editors.length}`);
     for (const editor of editors) {
         await syncDocument(editor.document, config);
     }
@@ -74,9 +96,9 @@ async function syncDocument(document, config) {
     const source = document.getText();
     const sourceLines = source.replace(/\r/g, '').split('\n');
     const assignments = (0, pythonAnalyzer_1.analyzeFile)(source, config);
-    log.appendLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s)`);
+    logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s)`);
     for (const a of assignments) {
-        log.appendLine(`    → ${a.varName} (lines ${a.range.startLine + 1}–${a.range.endLine + 1}), inputs: [${a.inputVars.join(', ')}]`);
+        logLine(`    → ${a.varName} (lines ${a.range.startLine + 1}–${a.range.endLine + 1}), inputs: [${a.inputVars.join(', ')}]`);
     }
     await manager.syncForFile(document.uri, assignments, sourceLines, config);
 }
@@ -85,23 +107,25 @@ function activate(context) {
     context.subscriptions.push(log);
     manager = new logpointManager_1.LogpointManager();
     context.subscriptions.push(manager);
-    log.appendLine('Datalog extension activated.');
+    // Resolve log file path before first logLine call
+    currentLogFilePath = resolveLogFilePath();
+    logLine('Datalog extension activated.');
     log.show(true); // show without stealing focus
     // --- Debug session lifecycle ---
     context.subscriptions.push(vscode.debug.onDidStartDebugSession(async (session) => {
-        log.appendLine(`Debug session started: type="${session.type}" name="${session.name}"`);
+        logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
         if (!isPythonSession(session)) {
-            log.appendLine('  → Not a Python/debugpy session, skipping.');
+            logLine('  → Not a Python/debugpy session, skipping.');
             return;
         }
-        log.appendLine('  → Python session detected, syncing logpoints...');
+        logLine('  → Python session detected, syncing logpoints...');
         await syncAllPythonEditors();
     }));
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((session) => {
-        log.appendLine(`Debug session ended: type="${session.type}"`);
+        logLine(`Debug session ended: type="${session.type}"`);
         if (isPythonSession(session)) {
             manager.clearAll();
-            log.appendLine('  → Logpoints cleared.');
+            logLine('  → Logpoints cleared.');
         }
     }));
     // --- Auto-refresh on save ---
@@ -115,13 +139,13 @@ function activate(context) {
         }
         const activeSession = vscode.debug.activeDebugSession;
         if (activeSession && isPythonSession(activeSession)) {
-            log.appendLine(`File saved, re-syncing: ${document.fileName}`);
+            logLine(`File saved, re-syncing: ${document.fileName}`);
             await syncDocument(document, config);
         }
     }));
     // --- Commands ---
     context.subscriptions.push(vscode.commands.registerCommand('vscode-datalog.refreshLogpoints', async () => {
-        log.appendLine('Command: refreshLogpoints');
+        logLine('Command: refreshLogpoints');
         const config = getConfig();
         if (!config.enabled) {
             vscode.window.showInformationMessage('Datalog is disabled. Enable it in settings first.');
@@ -131,7 +155,7 @@ function activate(context) {
         vscode.window.showInformationMessage('Datalog: Logpoints refreshed.');
     }));
     context.subscriptions.push(vscode.commands.registerCommand('vscode-datalog.clearLogpoints', () => {
-        log.appendLine('Command: clearLogpoints');
+        logLine('Command: clearLogpoints');
         manager.clearAll();
         vscode.window.showInformationMessage('Datalog: All logpoints cleared.');
     }));
