@@ -42,15 +42,14 @@ const outputFilter_1 = require("./outputFilter");
 let manager;
 let log;
 let currentLogFilePath = '';
-/** Write to both the Output Channel and plog.log (fire-and-forget for the file). */
+let currentLogExtensionOutput = false;
+/** Write to the Output Channel; also write to plog.log if logExtensionOutput is enabled. */
 function logLine(text) {
     log.appendLine(text);
-    if (!currentLogFilePath) {
+    if (!currentLogFilePath || !currentLogExtensionOutput) {
         return;
     }
     try {
-        // require is available at runtime in VS Code's CommonJS extension host
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('fs').appendFileSync(currentLogFilePath, text + '\n');
     }
     catch { /* ignore write errors */ }
@@ -68,6 +67,7 @@ function getConfig() {
     const sampleOutputFolder = cfg.get('sampleOutputFolder', 'worklib');
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     currentLogFilePath = resolveLogFilePath();
+    currentLogExtensionOutput = cfg.get('logExtensionOutput', false);
     return {
         polarsAlias: cfg.get('polarsAlias', 'pl'),
         dfNameSuffixes: cfg.get('dfNameSuffixes', ['_df', 'df', '_data']),
@@ -108,8 +108,10 @@ function activate(context) {
     context.subscriptions.push(log);
     manager = new logpointManager_1.LogpointManager();
     context.subscriptions.push(manager);
-    // Resolve log file path before first logLine call
+    // Resolve log file path and extension-output flag before first logLine call
     currentLogFilePath = resolveLogFilePath();
+    currentLogExtensionOutput = vscode.workspace.getConfiguration('vscode-datalog')
+        .get('logExtensionOutput', false);
     logLine('Datalog extension activated.');
     log.show(true); // show without stealing focus
     // --- Debug session lifecycle ---

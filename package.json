@@ -81,6 +81,11 @@
           "type": "string",
           "default": "plog.log",
           "description": "File name (relative to workspace root) where Datalog appends runtime DataFrame shape entries"
+        },
+        "vscode-datalog.logExtensionOutput": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also write extension analysis lines (files scanned, DataFrames found) to plog.log. Off by default; enable when debugging the extension."
         }
       }
     }
