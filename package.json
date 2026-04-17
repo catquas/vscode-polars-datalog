@@ -87,7 +87,8 @@
   },
   "scripts": {
     "compile": "tsc -p .",
-    "watch": "tsc -watch -p ."
+    "watch": "tsc -watch -p .",
+    "test": "tsc -p . && node out/test/index.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.92.0",
