@@ -42,7 +42,8 @@ let manager;
 let log;
 function getConfig() {
     const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-    const sampleOutputFolder = cfg.get('sampleOutputFolder', 'df_samples');
+    const sampleOutputFolder = cfg.get('sampleOutputFolder', 'worklib');
+    const logFile = cfg.get('logFile', 'plog.log');
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     return {
         polarsAlias: cfg.get('polarsAlias', 'pl'),
@@ -51,6 +52,7 @@ function getConfig() {
         exportSamples: cfg.get('exportSamples', true),
         sampleRows: cfg.get('sampleRows', 1000),
         outputFolderAbsPath: wsRoot ? vscode.Uri.joinPath(wsRoot, sampleOutputFolder).fsPath : '',
+        logFileAbsPath: wsRoot && logFile ? vscode.Uri.joinPath(wsRoot, logFile).fsPath : '',
     };
 }
 function isPythonSession(session) {
@@ -132,6 +134,44 @@ function activate(context) {
         log.appendLine('Command: clearLogpoints');
         manager.clearAll();
         vscode.window.showInformationMessage('Datalog: All logpoints cleared.');
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('vscode-datalog.focusWorklib', async () => {
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (!wsRoot) {
+            vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
+            return;
+        }
+        const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+        const folder = cfg.get('sampleOutputFolder', 'worklib');
+        const folderUri = vscode.Uri.joinPath(wsRoot, folder);
+        try {
+            await vscode.workspace.fs.stat(folderUri);
+        }
+        catch {
+            vscode.window.showWarningMessage(`Datalog: Folder "${folder}" does not exist yet.`);
+            return;
+        }
+        await vscode.commands.executeCommand('workbench.view.explorer');
+        await vscode.commands.executeCommand('revealInExplorer', folderUri);
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('vscode-datalog.openPlog', async () => {
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (!wsRoot) {
+            vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
+            return;
+        }
+        const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+        const logFile = cfg.get('logFile', 'plog.log');
+        const logUri = vscode.Uri.joinPath(wsRoot, logFile);
+        try {
+            await vscode.workspace.fs.stat(logUri);
+        }
+        catch {
+            vscode.window.showWarningMessage(`Datalog: "${logFile}" does not exist yet. Run a debug session first.`);
+            return;
+        }
+        const doc = await vscode.workspace.openTextDocument(logUri);
+        await vscode.window.showTextDocument(doc, { preview: false });
     }));
 }
 function deactivate() {

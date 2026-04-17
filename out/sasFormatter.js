@@ -41,15 +41,33 @@ function buildLogMessage(assignment, exportConfig) {
     parts.push(`NOTE: The data set ${assignment.varName} has ` +
         `${shapeRows(assignment.varName)} observations and ` +
         `${shapeCols(assignment.varName)} variables.`);
-    if (exportConfig?.exportSamples && exportConfig.outputFolderAbsPath) {
+    const hasCsv = !!(exportConfig?.exportSamples && exportConfig.outputFolderAbsPath);
+    const hasLog = !!(exportConfig?.logFileAbsPath);
+    if (hasCsv) {
         const absPath = exportConfig.outputFolderAbsPath.replace(/\\/g, '/');
+        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/');
         const v = assignment.varName;
         const n = exportConfig.sampleRows;
-        parts.push(`{(lambda _d: (_d.mkdir(parents=True, exist_ok=True), ` +
-            `${v}.head(${n}).write_csv(str(_d / '${v}.csv'))) ` +
+        // Optional log-write action appended inside the tuple
+        const logAction = logPath
+            ? `, open('${logPath}', 'a').write(` +
+                `__import__('datetime').datetime.now().strftime('[%H:%M:%S] ') + ` +
+                `'${v}: ' + str(_r[0]) + ' obs x ' + str(_r[1]) + ' vars\\n')`
+            : '';
+        parts.push(`{(lambda _d, _r: (_d.mkdir(parents=True, exist_ok=True), ` +
+            `${v}.head(${n}).write_csv(str(_d / '${v}.csv'))${logAction}) ` +
             `and ('→ CSV: ' + str(_d / '${v}.csv')))` +
-            `(__import__('pathlib').Path('${absPath}')) ` +
+            `(__import__('pathlib').Path('${absPath}'), ${v}.shape) ` +
             `if hasattr(${v}, 'write_csv') else '→ LazyFrame, skipped'}`);
+    }
+    else if (hasLog) {
+        // CSV disabled but log still requested
+        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/');
+        const v = assignment.varName;
+        parts.push(`{open('${logPath}', 'a').write(` +
+            `__import__('datetime').datetime.now().strftime('[%H:%M:%S] ') + ` +
+            `'${v}: ' + str(${v}.shape[0]) + ' obs x ' + str(${v}.shape[1]) + ' vars\\n') ` +
+            `and '→ logged' if hasattr(${v}, 'shape') else ''}`);
     }
     return parts.join(' | ');
 }

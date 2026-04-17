@@ -21,6 +21,26 @@
       {
         "command": "vscode-datalog.clearLogpoints",
         "title": "Datalog: Clear All Logpoints"
+      },
+      {
+        "command": "vscode-datalog.focusWorklib",
+        "title": "Datalog: Focus worklib Folder in Explorer"
+      },
+      {
+        "command": "vscode-datalog.openPlog",
+        "title": "Datalog: Open plog.log"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "vscode-datalog.focusWorklib",
+        "key": "ctrl+alt+w",
+        "mac": "cmd+alt+w"
+      },
+      {
+        "command": "vscode-datalog.openPlog",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
       }
     ],
     "configuration": {
@@ -54,8 +74,13 @@
         },
         "vscode-datalog.sampleOutputFolder": {
           "type": "string",
-          "default": "df_samples",
+          "default": "worklib",
           "description": "Folder name (relative to workspace root) where DataFrame sample CSVs are written"
+        },
+        "vscode-datalog.logFile": {
+          "type": "string",
+          "default": "plog.log",
+          "description": "File name (relative to workspace root) where Datalog appends runtime DataFrame shape entries"
         }
       }
     }
