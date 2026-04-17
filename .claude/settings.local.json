@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:code.visualstudio.com)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:microsoft.github.io)",
+      "WebFetch(domain:2ndworst.dev)",
+      "Bash(find /c/Users/brent/.vscode/extensions -maxdepth 3 -name \"*.vscodeignore\" 2>/dev/null | head -5)",
+      "Bash(find /c/Users/brent/.vscode/extensions/cweijan.vscode-autohotkey-plus-2.7.2 -name \"*.ts\" 2>/dev/null | head -10)",
+      "Bash(find /c/Users/brent/.vscode/extensions/cweijan.vscode-autohotkey-plus-2.7.2 -name \"package.json\" 2>/dev/null | xargs head -40 2>/dev/null)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

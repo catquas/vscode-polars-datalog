@@ -1,0 +1,79 @@
+import polars as pl
+from datetime import date
+
+# 1. Create a DataFrame
+# Polars uses dictionaries where keys are column names
+df = pl.DataFrame({
+    "name": ["Alice", "Bob", "Charlie", "David", "Eve"],
+    "age": [25, 30, 35, 40, 25],
+    "city": ["New York", "London", "London", "Paris", "New York"],
+    "joined_at": [date(2020, 1, 1), date(2021, 5, 12), date(2022, 3, 10), date(2020, 11, 5), date(2023, 1, 1)]
+})
+
+print("--- Initial DataFrame ---")
+print(df)
+
+# 2. Basic Inspection
+print("\n--- Schema & Summary ---")
+print(df.schema) # Check column types
+print(df.head(2)) # First 2 rows
+print(df.describe()) # Summary stats
+
+# 3. Selecting & Filtering
+# Use pl.col() for efficient expression-based operations
+filtered_df = df.select([
+    pl.col("name"),
+    pl.col("age")
+]).filter(
+    pl.col("age") > 28
+)
+
+print("\n--- Filtered (Age > 28) ---")
+print(filtered_df)
+
+# 4. Adding/Updating Columns (with_columns)
+df_with_new_col = df.with_columns([
+    (pl.col("age") * 2).alias("double_age"),
+    pl.when(pl.col("city") == "London").then(True).otherwise(False).alias("is_london")
+])
+
+print("\n--- With New Columns ---")
+print(df_with_new_col)
+
+# 5. Grouping & Aggregating
+group_df = df.group_by("city").agg([
+    pl.col("age").mean().alias("avg_age"),
+    pl.len().alias("count") # Count rows per group
+])
+
+print("\n--- Grouped by City ---")
+print(group_df)
+
+# 6. Joins
+# Create a second DataFrame to join
+df_cities = pl.DataFrame({
+    "city": ["New York", "London", "Paris"],
+    "country": ["USA", "UK", "France"]
+})
+
+joined_df = df.join(df_cities, on="city", how="left")
+
+print("\n--- Joined with Countries ---")
+print(joined_df)
+
+# 7. Lazy Execution (Recommended for large data)
+# Use .lazy() to build a query plan and .collect() to run it
+lazy_query = (
+    df.lazy()
+    .filter(pl.col("city") == "New York")
+    .select(["name", "age"])
+    .collect()
+)
+
+print("\n--- Result from Lazy Query ---")
+print(lazy_query)
+
+# 8. Writing Data
+# Supports CSV, Parquet, JSON, and more
+# df.write_csv("output.csv")
+# df.write_parquet("output.parquet")

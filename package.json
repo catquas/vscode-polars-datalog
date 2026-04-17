@@ -1,0 +1,56 @@
+{
+  "name": "vscode-datalog",
+  "displayName": "Datalog for Polars",
+  "description": "Automatically places logpoints after Polars DataFrame assignments to show row/column counts SAS-style in the Debug Console",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": ["Debuggers", "Other"],
+  "activationEvents": [
+    "onDebugSessionStart",
+    "onLanguage:python"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vscode-datalog.refreshLogpoints",
+        "title": "Datalog: Refresh Logpoints"
+      },
+      {
+        "command": "vscode-datalog.clearLogpoints",
+        "title": "Datalog: Clear All Logpoints"
+      }
+    ],
+    "configuration": {
+      "title": "Datalog for Polars",
+      "properties": {
+        "vscode-datalog.polarsAlias": {
+          "type": "string",
+          "default": "pl",
+          "description": "The alias used for the polars import (e.g. import polars as pl)"
+        },
+        "vscode-datalog.dfNameSuffixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["_df", "df", "_data"],
+          "description": "Variable name suffixes that identify a variable as a DataFrame"
+        },
+        "vscode-datalog.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable automatic logpoint injection"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p ."
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.92.0",
+    "typescript": "^5.8.3"
+  }
+}
