@@ -9,6 +9,15 @@ function escapeForLogpoint(text) {
     return text.replace(/\{/g, '{{').replace(/\}/g, '}}');
 }
 /**
+ * Return the first line of source text. For multi-line assignments the full
+ * body is too verbose and gets collapsed to one long line by the debugger, so
+ * we only show the opening line and append " ..." as a continuation marker.
+ */
+function codeLabel(sourceText) {
+    const nl = sourceText.indexOf('\n');
+    return nl === -1 ? sourceText : sourceText.slice(0, nl) + ' ...';
+}
+/**
  * Build a Python expression that evaluates to the row count of varName,
  * or '?' if the variable doesn't have a .shape attribute.
  */
@@ -34,7 +43,7 @@ function shapeCols(varName) {
 function buildLogMessage(assignment, exportConfig) {
     const parts = [];
     parts.push('===DATALOG===');
-    parts.push(`Code: ${escapeForLogpoint(assignment.sourceText)}`);
+    parts.push(`Code: ${escapeForLogpoint(codeLabel(assignment.sourceText))}`);
     for (const inputVar of assignment.inputVars) {
         parts.push(`${inputVar}: ${shapeRows(inputVar)} obs x ${shapeCols(inputVar)} vars`);
     }

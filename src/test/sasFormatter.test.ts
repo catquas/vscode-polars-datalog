@@ -86,6 +86,21 @@ suite('buildLogMessage — input vars', () => {
 // ---------------------------------------------------------------------------
 // Brace escaping in source text
 // ---------------------------------------------------------------------------
+suite('buildLogMessage — code label truncation', () => {
+  test('single-line source shown in full', () => {
+    const msg = buildLogMessage(base);
+    includes(msg, 'result_df = input_df.filter(pl.col');
+  });
+
+  test('multi-line source truncated to first line + " ..."', () => {
+    const a = { ...base, sourceText: 'result_df = pl.DataFrame({\n    "a": [1]\n})' };
+    const msg = buildLogMessage(a);
+    // { is escaped to {{ in logpoint messages; the body lines are dropped
+    includes(msg, 'result_df = pl.DataFrame({{ ...');
+    notIncludes(msg, '"a": [1]');
+  });
+});
+
 suite('buildLogMessage — brace escaping', () => {
   test('curly braces in source code are escaped', () => {
     const a = { ...base, sourceText: 'df = pl.DataFrame({"a": [1]})' };

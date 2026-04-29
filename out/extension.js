@@ -43,6 +43,7 @@ let manager;
 let log;
 let currentLogFilePath = '';
 let currentLogExtensionOutput = false;
+let syncInProgress = false;
 /** Write to the Output Channel; also write to plog.log if logExtensionOutput is enabled. */
 function logLine(text) {
     log.appendLine(text);
@@ -82,15 +83,26 @@ function isPythonSession(session) {
     return session.type === 'python' || session.type === 'debugpy';
 }
 async function syncAllPythonEditors() {
-    const config = getConfig();
-    if (!config.enabled) {
-        logLine('Skipping sync — extension is disabled in settings.');
+    // Guard against multiple rapid calls (VS Code fires onDidStartDebugSession
+    // once per debugpy sub-session; we only need to sync once per run).
+    if (syncInProgress) {
         return;
     }
-    const editors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === 'python');
-    logLine(`Visible Python editors: ${editors.length}`);
-    for (const editor of editors) {
-        await syncDocument(editor.document, config);
+    syncInProgress = true;
+    try {
+        const config = getConfig();
+        if (!config.enabled) {
+            logLine('Skipping sync — extension is disabled in settings.');
+            return;
+        }
+        const editors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === 'python');
+        logLine(`Visible Python editors: ${editors.length}`);
+        for (const editor of editors) {
+            await syncDocument(editor.document, config);
+        }
+    }
+    finally {
+        syncInProgress = false;
     }
 }
 async function syncDocument(document, config) {
@@ -191,6 +203,12 @@ function activate(context) {
     context.subscriptions.push(vscode.debug.registerDebugAdapterTrackerFactory('*', {
         createDebugAdapterTracker(session) {
             if (!isPythonSession(session)) {
+                return undefined;
+            }
+            // Child sessions (e.g. debugpy subprocess sessions) share the same
+            // output stream as their parent — attaching a tracker to each would
+            // write duplicate entries to plog.log.
+            if (session.parentSession !== undefined) {
                 return undefined;
             }
             const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;

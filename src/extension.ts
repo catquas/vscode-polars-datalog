@@ -11,6 +11,7 @@ let manager: LogpointManager;
 let log: vscode.OutputChannel;
 let currentLogFilePath = '';
 let currentLogExtensionOutput = false;
+let syncInProgress = false;
 
 /** Write to the Output Channel; also write to plog.log if logExtensionOutput is enabled. */
 function logLine(text: string): void {
@@ -50,19 +51,27 @@ function isPythonSession(session: vscode.DebugSession): boolean {
 }
 
 async function syncAllPythonEditors(): Promise<void> {
-  const config = getConfig();
-  if (!config.enabled) {
-    logLine('Skipping sync — extension is disabled in settings.');
-    return;
-  }
+  // Guard against multiple rapid calls (VS Code fires onDidStartDebugSession
+  // once per debugpy sub-session; we only need to sync once per run).
+  if (syncInProgress) { return; }
+  syncInProgress = true;
+  try {
+    const config = getConfig();
+    if (!config.enabled) {
+      logLine('Skipping sync — extension is disabled in settings.');
+      return;
+    }
 
-  const editors = vscode.window.visibleTextEditors.filter(
-    e => e.document.languageId === 'python'
-  );
-  logLine(`Visible Python editors: ${editors.length}`);
+    const editors = vscode.window.visibleTextEditors.filter(
+      e => e.document.languageId === 'python'
+    );
+    logLine(`Visible Python editors: ${editors.length}`);
 
-  for (const editor of editors) {
-    await syncDocument(editor.document, config);
+    for (const editor of editors) {
+      await syncDocument(editor.document, config);
+    }
+  } finally {
+    syncInProgress = false;
   }
 }
 
@@ -194,6 +203,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.debug.registerDebugAdapterTrackerFactory('*', {
       createDebugAdapterTracker(session: vscode.DebugSession) {
         if (!isPythonSession(session)) { return undefined; }
+        // Child sessions (e.g. debugpy subprocess sessions) share the same
+        // output stream as their parent — attaching a tracker to each would
+        // write duplicate entries to plog.log.
+        if (session.parentSession !== undefined) { return undefined; }
 
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
         if (!wsRoot) { return undefined; }
