@@ -79,12 +79,13 @@ const logOnly = {
         const msg = (0, sasFormatter_1.buildLogMessage)(base);
         (0, runner_1.includes)(msg, 'result_df = input_df.filter(pl.col');
     });
-    (0, runner_1.test)('multi-line source collapses to "varName = ..."', () => {
+    (0, runner_1.test)('multi-line source: first line truncated before unmatched {', () => {
         const a = { ...base, sourceText: 'result_df = pl.DataFrame({\n    "a": [1]\n})' };
         const msg = (0, sasFormatter_1.buildLogMessage)(a);
-        // Multi-line: use safe "varName = ..." label — never the raw first line
-        // which may contain an unmatched { causing debugpy "Unbalanced braces".
-        (0, runner_1.includes)(msg, 'Code: result_df = ...');
+        // First line is 'result_df = pl.DataFrame({' which ends with an unmatched {.
+        // codeLabel truncates to the last balanced position (before the {) to prevent
+        // debugpy "Unbalanced braces" errors in the logpoint template.
+        (0, runner_1.includes)(msg, 'Code: result_df = pl.DataFrame( ...');
         (0, runner_1.notIncludes)(msg, '"a": [1]');
     });
 });
@@ -195,6 +196,26 @@ const logOnly = {
     (0, runner_1.test)('custom varName used in csv filename', () => {
         const a = { ...base, varName: 'other_df', inputVars: [] };
         (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(a, withCsv), "'other_df.csv'");
+    });
+});
+// ---------------------------------------------------------------------------
+// Dedup guard
+// ---------------------------------------------------------------------------
+(0, runner_1.suite)('buildLogMessage — dedup guard', () => {
+    (0, runner_1.test)('dedup guard present when CSV enabled', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withCsv), '_dl_datalog');
+    });
+    (0, runner_1.test)('dedup guard present when log only enabled', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, logOnly), '_dl_datalog');
+    });
+    (0, runner_1.test)('dedup guard absent when no export config', () => {
+        (0, runner_1.notIncludes)((0, sasFormatter_1.buildLogMessage)(base), '_dl_datalog');
+    });
+    (0, runner_1.test)('dedup guard absent when both disabled', () => {
+        (0, runner_1.notIncludes)((0, sasFormatter_1.buildLogMessage)(base, noExport), '_dl_datalog');
+    });
+    (0, runner_1.test)('dedup guard uses id() of output var', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withCsv), 'id(result_df)');
     });
 });
 //# sourceMappingURL=sasFormatter.test.js.map
