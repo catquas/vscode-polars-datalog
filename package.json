@@ -21,6 +21,26 @@
       {
         "command": "vscode-datalog.clearLogpoints",
         "title": "Datalog: Clear All Logpoints"
+      },
+      {
+        "command": "vscode-datalog.focusWorklib",
+        "title": "Datalog: Focus worklib Folder in Explorer"
+      },
+      {
+        "command": "vscode-datalog.openPlog",
+        "title": "Datalog: Open plog.log"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "vscode-datalog.focusWorklib",
+        "key": "ctrl+alt+w",
+        "mac": "cmd+alt+w"
+      },
+      {
+        "command": "vscode-datalog.openPlog",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
       }
     ],
     "configuration": {
@@ -41,13 +61,39 @@
           "type": "boolean",
           "default": true,
           "description": "Enable or disable automatic logpoint injection"
+        },
+        "vscode-datalog.exportSamples": {
+          "type": "boolean",
+          "default": true,
+          "description": "Export the top rows of each DataFrame to a CSV file during debugging"
+        },
+        "vscode-datalog.sampleRows": {
+          "type": "number",
+          "default": 1000,
+          "description": "Number of rows to write per DataFrame sample CSV"
+        },
+        "vscode-datalog.sampleOutputFolder": {
+          "type": "string",
+          "default": "worklib",
+          "description": "Folder name (relative to workspace root) where DataFrame sample CSVs are written"
+        },
+        "vscode-datalog.logFile": {
+          "type": "string",
+          "default": "plog.log",
+          "description": "File name (relative to workspace root) where Datalog appends runtime DataFrame shape entries"
+        },
+        "vscode-datalog.logExtensionOutput": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also write extension analysis lines (files scanned, DataFrames found) to plog.log. Off by default; enable when debugging the extension."
         }
       }
     }
   },
   "scripts": {
     "compile": "tsc -p .",
-    "watch": "tsc -watch -p ."
+    "watch": "tsc -watch -p .",
+    "test": "tsc -p . && node out/test/index.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.92.0",
