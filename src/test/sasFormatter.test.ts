@@ -92,12 +92,13 @@ suite('buildLogMessage — code label truncation', () => {
     includes(msg, 'result_df = input_df.filter(pl.col');
   });
 
-  test('multi-line source collapses to "varName = ..."', () => {
+  test('multi-line source: first line truncated before unmatched {', () => {
     const a = { ...base, sourceText: 'result_df = pl.DataFrame({\n    "a": [1]\n})' };
     const msg = buildLogMessage(a);
-    // Multi-line: use safe "varName = ..." label — never the raw first line
-    // which may contain an unmatched { causing debugpy "Unbalanced braces".
-    includes(msg, 'Code: result_df = ...');
+    // First line is 'result_df = pl.DataFrame({' which ends with an unmatched {.
+    // codeLabel truncates to the last balanced position (before the {) to prevent
+    // debugpy "Unbalanced braces" errors in the logpoint template.
+    includes(msg, 'Code: result_df = pl.DataFrame( ...');
     notIncludes(msg, '"a": [1]');
   });
 });
@@ -220,5 +221,30 @@ suite('buildLogMessage — variable name interpolation', () => {
   test('custom varName used in csv filename', () => {
     const a = { ...base, varName: 'other_df', inputVars: [] };
     includes(buildLogMessage(a, withCsv), "'other_df.csv'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dedup guard
+// ---------------------------------------------------------------------------
+suite('buildLogMessage — dedup guard', () => {
+  test('dedup guard present when CSV enabled', () => {
+    includes(buildLogMessage(base, withCsv), '_dl_datalog');
+  });
+
+  test('dedup guard present when log only enabled', () => {
+    includes(buildLogMessage(base, logOnly), '_dl_datalog');
+  });
+
+  test('dedup guard absent when no export config', () => {
+    notIncludes(buildLogMessage(base), '_dl_datalog');
+  });
+
+  test('dedup guard absent when both disabled', () => {
+    notIncludes(buildLogMessage(base, noExport), '_dl_datalog');
+  });
+
+  test('dedup guard uses id() of output var', () => {
+    includes(buildLogMessage(base, withCsv), 'id(result_df)');
   });
 });
