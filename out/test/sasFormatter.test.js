@@ -79,11 +79,12 @@ const logOnly = {
         const msg = (0, sasFormatter_1.buildLogMessage)(base);
         (0, runner_1.includes)(msg, 'result_df = input_df.filter(pl.col');
     });
-    (0, runner_1.test)('multi-line source truncated to first line + " ..."', () => {
+    (0, runner_1.test)('multi-line source collapses to "varName = ..."', () => {
         const a = { ...base, sourceText: 'result_df = pl.DataFrame({\n    "a": [1]\n})' };
         const msg = (0, sasFormatter_1.buildLogMessage)(a);
-        // { is escaped to {{ in logpoint messages; the body lines are dropped
-        (0, runner_1.includes)(msg, 'result_df = pl.DataFrame({{ ...');
+        // Multi-line: use safe "varName = ..." label — never the raw first line
+        // which may contain an unmatched { causing debugpy "Unbalanced braces".
+        (0, runner_1.includes)(msg, 'Code: result_df = ...');
         (0, runner_1.notIncludes)(msg, '"a": [1]');
     });
 });

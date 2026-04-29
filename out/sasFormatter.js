@@ -9,13 +9,14 @@ function escapeForLogpoint(text) {
     return text.replace(/\{/g, '{{').replace(/\}/g, '}}');
 }
 /**
- * Return the first line of source text. For multi-line assignments the full
- * body is too verbose and gets collapsed to one long line by the debugger, so
- * we only show the opening line and append " ..." as a continuation marker.
+ * Return a safe one-line label for the logpoint Code: section.
+ * For single-line source the text is returned as-is.
+ * For multi-line source we use "varName = ..." — never the raw first line,
+ * because that may contain an unmatched { which causes debugpy to reject the
+ * logpoint with "Unbalanced braces".
  */
-function codeLabel(sourceText) {
-    const nl = sourceText.indexOf('\n');
-    return nl === -1 ? sourceText : sourceText.slice(0, nl) + ' ...';
+function codeLabel(sourceText, varName) {
+    return sourceText.includes('\n') ? `${varName} = ...` : sourceText;
 }
 /**
  * Build a Python expression that evaluates to the row count of varName,
@@ -43,7 +44,7 @@ function shapeCols(varName) {
 function buildLogMessage(assignment, exportConfig) {
     const parts = [];
     parts.push('===DATALOG===');
-    parts.push(`Code: ${escapeForLogpoint(codeLabel(assignment.sourceText))}`);
+    parts.push(`Code: ${escapeForLogpoint(codeLabel(assignment.sourceText, assignment.varName))}`);
     for (const inputVar of assignment.inputVars) {
         parts.push(`${inputVar}: ${shapeRows(inputVar)} obs x ${shapeCols(inputVar)} vars`);
     }

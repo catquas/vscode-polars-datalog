@@ -43,7 +43,12 @@ let manager;
 let log;
 let currentLogFilePath = '';
 let currentLogExtensionOutput = false;
-let syncInProgress = false;
+// Count of active Python debug sessions in the current run. Sync runs only
+// on the first session start; logpoints are cleared only when it drops to 0.
+let activePythonSessions = 0;
+// Session ID of the one DAP tracker we attach per debug run (to prevent
+// duplicating plog.log writes when debugpy spawns multiple sub-sessions).
+let activeTrackerSessionId;
 /** Write to the Output Channel; also write to plog.log if logExtensionOutput is enabled. */
 function logLine(text) {
     log.appendLine(text);
@@ -83,26 +88,15 @@ function isPythonSession(session) {
     return session.type === 'python' || session.type === 'debugpy';
 }
 async function syncAllPythonEditors() {
-    // Guard against multiple rapid calls (VS Code fires onDidStartDebugSession
-    // once per debugpy sub-session; we only need to sync once per run).
-    if (syncInProgress) {
+    const config = getConfig();
+    if (!config.enabled) {
+        logLine('Skipping sync — extension is disabled in settings.');
         return;
     }
-    syncInProgress = true;
-    try {
-        const config = getConfig();
-        if (!config.enabled) {
-            logLine('Skipping sync — extension is disabled in settings.');
-            return;
-        }
-        const editors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === 'python');
-        logLine(`Visible Python editors: ${editors.length}`);
-        for (const editor of editors) {
-            await syncDocument(editor.document, config);
-        }
-    }
-    finally {
-        syncInProgress = false;
+    const editors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === 'python');
+    logLine(`Visible Python editors: ${editors.length}`);
+    for (const editor of editors) {
+        await syncDocument(editor.document, config);
     }
 }
 async function syncDocument(document, config) {
@@ -133,14 +127,30 @@ function activate(context) {
             logLine('  → Not a Python/debugpy session, skipping.');
             return;
         }
-        logLine('  → Python session detected, syncing logpoints...');
-        await syncAllPythonEditors();
+        const isFirst = activePythonSessions === 0;
+        activePythonSessions++;
+        logLine(`  → Python session #${activePythonSessions} detected.`);
+        if (isFirst) {
+            logLine('  → First session — syncing logpoints...');
+            await syncAllPythonEditors();
+        }
+        else {
+            logLine('  → Sub-session — skipping duplicate sync.');
+        }
     }));
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((session) => {
         logLine(`Debug session ended: type="${session.type}"`);
-        if (isPythonSession(session)) {
+        if (!isPythonSession(session)) {
+            return;
+        }
+        activePythonSessions = Math.max(0, activePythonSessions - 1);
+        if (activePythonSessions === 0) {
             manager.clearAll();
-            logLine('  → Logpoints cleared.');
+            activeTrackerSessionId = undefined;
+            logLine('  → All sessions ended, logpoints cleared.');
+        }
+        else {
+            logLine(`  → ${activePythonSessions} session(s) still active.`);
         }
     }));
     // --- Auto-refresh on save ---
@@ -205,12 +215,12 @@ function activate(context) {
             if (!isPythonSession(session)) {
                 return undefined;
             }
-            // Child sessions (e.g. debugpy subprocess sessions) share the same
-            // output stream as their parent — attaching a tracker to each would
-            // write duplicate entries to plog.log.
-            if (session.parentSession !== undefined) {
+            // Allow only one tracker per debug run to prevent duplicate plog.log
+            // writes when debugpy spawns multiple sub-sessions.
+            if (activeTrackerSessionId !== undefined) {
                 return undefined;
             }
+            activeTrackerSessionId = session.id;
             const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
             if (!wsRoot) {
                 return undefined;
