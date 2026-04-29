@@ -16,13 +16,14 @@ function escapeForLogpoint(text: string): string {
 }
 
 /**
- * Return the first line of source text. For multi-line assignments the full
- * body is too verbose and gets collapsed to one long line by the debugger, so
- * we only show the opening line and append " ..." as a continuation marker.
+ * Return a safe one-line label for the logpoint Code: section.
+ * For single-line source the text is returned as-is.
+ * For multi-line source we use "varName = ..." — never the raw first line,
+ * because that may contain an unmatched { which causes debugpy to reject the
+ * logpoint with "Unbalanced braces".
  */
-function codeLabel(sourceText: string): string {
-  const nl = sourceText.indexOf('\n');
-  return nl === -1 ? sourceText : sourceText.slice(0, nl) + ' ...';
+function codeLabel(sourceText: string, varName: string): string {
+  return sourceText.includes('\n') ? `${varName} = ...` : sourceText;
 }
 
 /**
@@ -54,7 +55,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   const parts: string[] = [];
 
   parts.push('===DATALOG===');
-  parts.push(`Code: ${escapeForLogpoint(codeLabel(assignment.sourceText))}`);
+  parts.push(`Code: ${escapeForLogpoint(codeLabel(assignment.sourceText, assignment.varName))}`);
 
   for (const inputVar of assignment.inputVars) {
     parts.push(`${inputVar}: ${shapeRows(inputVar)} obs x ${shapeCols(inputVar)} vars`);
