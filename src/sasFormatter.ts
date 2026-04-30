@@ -45,16 +45,16 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   const parts: string[] = [];
 
   parts.push('\n===DATALOG===');
-  parts.push(`Code: ${escapeForLogpoint(assignment.sourceText)}`);
+  parts.push(`\n${escapeForLogpoint(assignment.sourceText)}`);
 
   for (const inputVar of assignment.inputVars) {
-    parts.push(`${inputVar}: ${shapeRows(inputVar)} obs x ${shapeCols(inputVar)} vars`);
+    parts.push(`\nInput dataframe "${inputVar}" has ${shapeRows(inputVar)} rows and ${shapeCols(inputVar)} columns.`);
   }
 
   parts.push(
-    `NOTE: The data set ${assignment.varName} has ` +
-    `${shapeRows(assignment.varName)} observations and ` +
-    `${shapeCols(assignment.varName)} variables.`
+    `\nNew dataframe "${assignment.varName}" has ` +
+    `${shapeRows(assignment.varName)} rows and ` +
+    `${shapeCols(assignment.varName)} columns.`
   );
 
   const hasCsv = !!(exportConfig?.exportSamples && exportConfig.outputFolderAbsPath);
@@ -76,7 +76,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
     parts.push(
       `{(lambda _d, _r: (_d.mkdir(parents=True, exist_ok=True), ` +
       `${v}.head(${n}).write_csv(str(_d / '${v}.csv'))${logAction}) ` +
-      `and ('→ CSV: ' + str(_d / '${v}.csv')))` +
+      `and ('→ ' + str('${v}.csv')))` +
       `(__import__('pathlib').Path('${absPath}'), ${v}.shape) ` +
       `if hasattr(${v}, 'write_csv') else '→ LazyFrame, skipped'}`
     );
@@ -94,5 +94,5 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
 
   // Break after the Code block so metadata stays on its own line
   const [header, code, ...rest] = parts;
-  return `${header} | ${code}\n${rest.join(' | ')}`;
+  return `${header}${code}${rest.join(' ')}`;
 }
