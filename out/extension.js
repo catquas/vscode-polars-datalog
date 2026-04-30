@@ -67,11 +67,12 @@ async function syncDocument(document, config) {
     const source = document.getText();
     const sourceLines = source.replace(/\r/g, '').split('\n');
     const assignments = (0, pythonAnalyzer_1.analyzeFile)(source, config);
-    logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s)`);
+    const printVars = (0, pythonAnalyzer_1.findPrintVarStatements)(source);
+    logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s), ${printVars.length} print-var statement(s)`);
     for (const a of assignments) {
         logLine(`    → ${a.varName} (lines ${a.range.startLine + 1}–${a.range.endLine + 1}), inputs: [${a.inputVars.join(', ')}]`);
     }
-    await manager.syncForFile(document.uri, assignments, sourceLines, config);
+    await manager.syncForFile(document.uri, assignments, printVars, sourceLines, config);
 }
 function activate(context) {
     log = vscode.window.createOutputChannel('Datalog');

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildLogMessage = buildLogMessage;
+exports.buildPrintVarLogMessage = buildPrintVarLogMessage;
 /**
  * Escape literal { and } in text so VS Code logpoint interpolation
  * does not treat them as expression delimiters.
@@ -72,5 +73,8 @@ function buildLogMessage(assignment, exportConfig) {
     // Break after the Code block so metadata stays on its own line
     const [header, code, ...rest] = parts;
     return `${header}${code}${rest.join(' ')}`;
+}
+function buildPrintVarLogMessage(varName) {
+    return `\n===DATALOG=== ${varName}= {repr(${varName})}`;
 }
 //# sourceMappingURL=sasFormatter.js.map

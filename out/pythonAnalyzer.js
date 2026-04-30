@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.countNetBrackets = countNetBrackets;
 exports.findInputVars = findInputVars;
+exports.findPrintVarStatements = findPrintVarStatements;
 exports.analyzeFile = analyzeFile;
 /**
  * Walk text character-by-character tracking string state to count net bracket depth.
@@ -109,6 +110,18 @@ function isDataFrameAssignment(varName, rhs, knownDfVars, config) {
         return true;
     }
     return false;
+}
+const PRINT_VAR_RE = /^\s*print\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/;
+function findPrintVarStatements(source) {
+    const lines = source.replace(/\r/g, '').split('\n');
+    const results = [];
+    for (let i = 0; i < lines.length; i++) {
+        const m = PRINT_VAR_RE.exec(lines[i]);
+        if (m) {
+            results.push({ varName: m[1], line: i });
+        }
+    }
+    return results;
 }
 // Matches: [optional indent] varName = rhs (plain assignment only, not ==, +=, -=, etc.)
 // No lookbehind needed: augmented assignments like += naturally fail because \s*= won't match "+="

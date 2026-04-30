@@ -96,3 +96,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   const [header, code, ...rest] = parts;
   return `${header}${code}${rest.join(' ')}`;
 }
+
+export function buildPrintVarLogMessage(varName: string): string {
+  return `\n===DATALOG=== ${varName}={repr(${varName})}`;
+}

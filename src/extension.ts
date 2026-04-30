@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { analyzeFile, AnalyzerConfig } from './pythonAnalyzer';
+import { analyzeFile, AnalyzerConfig, findPrintVarStatements } from './pythonAnalyzer';
 import { LogpointManager } from './logpointManager';
 import { ExportConfig } from './sasFormatter';
 
@@ -76,11 +76,12 @@ async function syncDocument(
   const source = document.getText();
   const sourceLines = source.replace(/\r/g, '').split('\n');
   const assignments = analyzeFile(source, config);
-  logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s)`);
+  const printVars = findPrintVarStatements(source);
+  logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s), ${printVars.length} print-var statement(s)`);
   for (const a of assignments) {
     logLine(`    → ${a.varName} (lines ${a.range.startLine + 1}–${a.range.endLine + 1}), inputs: [${a.inputVars.join(', ')}]`);
   }
-  await manager.syncForFile(document.uri, assignments, sourceLines, config);
+  await manager.syncForFile(document.uri, assignments, printVars, sourceLines, config);
 }
 
 export function activate(context: vscode.ExtensionContext): void {

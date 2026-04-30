@@ -135,6 +135,23 @@ function isDataFrameAssignment(
   return false;
 }
 
+export interface PrintVarStatement {
+  varName: string;
+  line: number; // 0-based
+}
+
+const PRINT_VAR_RE = /^\s*print\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:#.*)?$/;
+
+export function findPrintVarStatements(source: string): PrintVarStatement[] {
+  const lines = source.replace(/\r/g, '').split('\n');
+  const results: PrintVarStatement[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = PRINT_VAR_RE.exec(lines[i]);
+    if (m) { results.push({ varName: m[1], line: i }); }
+  }
+  return results;
+}
+
 // Matches: [optional indent] varName = rhs (plain assignment only, not ==, +=, -=, etc.)
 // No lookbehind needed: augmented assignments like += naturally fail because \s*= won't match "+="
 const ASSIGNMENT_RE = /^(\s*)([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$/;

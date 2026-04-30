@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { DataFrameAssignment } from './pythonAnalyzer';
-import { buildLogMessage, ExportConfig } from './sasFormatter';
+import { DataFrameAssignment, PrintVarStatement } from './pythonAnalyzer';
+import { buildLogMessage, buildPrintVarLogMessage, ExportConfig } from './sasFormatter';
 
 /**
  * Find the first executable line at or after `startAt` (0-based).
@@ -27,12 +27,13 @@ export class LogpointManager implements vscode.Disposable {
   async syncForFile(
     uri: vscode.Uri,
     assignments: DataFrameAssignment[],
+    printVars: PrintVarStatement[],
     sourceLines: string[],
     exportConfig?: ExportConfig
   ): Promise<void> {
     this.removeForFile(uri);
 
-    if (assignments.length === 0) {
+    if (assignments.length === 0 && printVars.length === 0) {
       return;
     }
 
@@ -45,16 +46,20 @@ export class LogpointManager implements vscode.Disposable {
       // real Python statement where all assigned variables are in scope.
       const logLine = nextExecutableLine(sourceLines, assignment.range.endLine + 1, maxLine);
       const logMessage = buildLogMessage(assignment, exportConfig);
-
-      const bp = new vscode.SourceBreakpoint(
+      breakpoints.push(new vscode.SourceBreakpoint(
         new vscode.Location(uri, new vscode.Range(logLine, 0, logLine, 0)),
-        true,
-        undefined,
+        true, undefined,
         '1',        // fire once per debug session; debugpy traces multi-line expressions multiple times
         logMessage
-      );
+      ));
+    }
 
-      breakpoints.push(bp);
+    for (const pv of printVars) {
+      breakpoints.push(new vscode.SourceBreakpoint(
+        new vscode.Location(uri, new vscode.Range(Math.min(pv.line, maxLine), 0, Math.min(pv.line, maxLine), 0)),
+        true, undefined, '1',
+        buildPrintVarLogMessage(pv.varName)
+      ));
     }
 
     this.managedBreakpoints.set(uri.toString(), breakpoints);
