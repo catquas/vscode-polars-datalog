@@ -1,40 +1,7 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LogpointManager = void 0;
-const vscode = __importStar(require("vscode"));
+const vscode = require("vscode");
 const sasFormatter_1 = require("./sasFormatter");
 /**
  * Find the first executable line at or after `startAt` (0-based).
@@ -71,7 +38,8 @@ class LogpointManager {
             // real Python statement where all assigned variables are in scope.
             const logLine = nextExecutableLine(sourceLines, assignment.range.endLine + 1, maxLine);
             const logMessage = (0, sasFormatter_1.buildLogMessage)(assignment, exportConfig);
-            const bp = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Range(logLine, 0, logLine, 0)), true, undefined, undefined, logMessage);
+            const bp = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Range(logLine, 0, logLine, 0)), true, undefined, '1', // fire once per debug session; debugpy traces multi-line expressions multiple times
+            logMessage);
             breakpoints.push(bp);
         }
         this.managedBreakpoints.set(uri.toString(), breakpoints);
@@ -84,6 +52,15 @@ class LogpointManager {
             vscode.debug.removeBreakpoints(existing);
         }
         this.managedBreakpoints.delete(key);
+    }
+    purgeStale() {
+        // Use duck-typing instead of instanceof — VS Code may return proxy objects
+        // from vscode.debug.breakpoints that don't pass instanceof checks.
+        const stale = vscode.debug.breakpoints.filter(bp => bp.logMessage?.includes('===DATALOG==='));
+        if (stale.length > 0) {
+            vscode.debug.removeBreakpoints(stale);
+        }
+        return stale.length;
     }
     clearAll() {
         const all = [];

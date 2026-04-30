@@ -13,24 +13,28 @@ const noExport = {
     sampleRows: 1000,
     outputFolderAbsPath: '',
     logFileAbsPath: '',
+    logTimestampLines: false,
 };
 const withCsv = {
     exportSamples: true,
     sampleRows: 1000,
     outputFolderAbsPath: '/workspace/worklib',
     logFileAbsPath: '',
+    logTimestampLines: false,
 };
 const withCsvAndLog = {
     exportSamples: true,
     sampleRows: 500,
     outputFolderAbsPath: '/workspace/worklib',
     logFileAbsPath: '/workspace/plog.log',
+    logTimestampLines: true,
 };
 const logOnly = {
     exportSamples: false,
     sampleRows: 1000,
     outputFolderAbsPath: '',
     logFileAbsPath: '/workspace/plog.log',
+    logTimestampLines: true,
 };
 // ---------------------------------------------------------------------------
 // Core structure

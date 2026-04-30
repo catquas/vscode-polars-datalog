@@ -1,41 +1,8 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
-const vscode = __importStar(require("vscode"));
+const vscode = require("vscode");
 const pythonAnalyzer_1 = require("./pythonAnalyzer");
 const logpointManager_1 = require("./logpointManager");
 const outputFilter_1 = require("./outputFilter");
@@ -76,6 +43,7 @@ function getConfig() {
         sampleRows: cfg.get('sampleRows', 1000),
         outputFolderAbsPath: wsRoot ? vscode.Uri.joinPath(wsRoot, sampleOutputFolder).fsPath : '',
         logFileAbsPath: currentLogFilePath,
+        logTimestampLines: cfg.get('logTimestampLines', false),
     };
 }
 function isPythonSession(session) {
@@ -88,6 +56,9 @@ async function syncAllPythonEditors() {
         return;
     }
     const editors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === 'python');
+    const totalBps = vscode.debug.breakpoints.length;
+    const purged = manager.purgeStale();
+    logLine(`  → purgeStale: ${totalBps} total breakpoints, removed ${purged} stale`);
     logLine(`Visible Python editors: ${editors.length}`);
     for (const editor of editors) {
         await syncDocument(editor.document, config);
@@ -116,11 +87,19 @@ function activate(context) {
     log.show(true); // show without stealing focus
     // --- Debug session lifecycle ---
     context.subscriptions.push(vscode.debug.onDidStartDebugSession(async (session) => {
-        logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
         if (!isPythonSession(session)) {
+            logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
             logLine('  → Not a Python/debugpy session, skipping.');
             return;
         }
+        // Clear the log file so each run starts fresh
+        if (currentLogFilePath) {
+            try {
+                require('fs').writeFileSync(currentLogFilePath, '');
+            }
+            catch { /* ignore */ }
+        }
+        logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
         logLine('  → Python session detected, syncing logpoints...');
         await syncAllPythonEditors();
     }));
@@ -184,10 +163,10 @@ function activate(context) {
     // --- Capture stdout/stderr from Python debug sessions → plog.log ---
     //
     // We use a DebugAdapterTrackerFactory to intercept DAP 'output' events.
-    // Only 'stdout' and 'stderr' categories are written; 'console' is skipped
-    // because that is where evaluated logpoint expressions appear — they already
-    // write directly to plog.log via the Python side-effect expression, so
-    // capturing them here would duplicate entries.
+    // 'stdout' and 'stderr' carry normal program output and are written through
+    // TracebackFilter. 'console' is the DAP default category; we capture it only
+    // when it carries the '===DATALOG===' marker (logpoint evaluation results),
+    // writing verbatim. All other console output is ignored.
     context.subscriptions.push(vscode.debug.registerDebugAdapterTrackerFactory('*', {
         createDebugAdapterTracker(session) {
             if (!isPythonSession(session)) {
@@ -218,11 +197,14 @@ function activate(context) {
                     if (message.type !== 'event' || message.event !== 'output') {
                         return;
                     }
-                    const cat = message.body?.category ?? 'stdout';
-                    if (cat !== 'stdout' && cat !== 'stderr') {
-                        return;
+                    const cat = message.body?.category ?? 'console';
+                    const output = message.body?.output ?? '';
+                    if (cat === 'stdout' || cat === 'stderr') {
+                        appendFiltered(filter.feed(output));
                     }
-                    appendFiltered(filter.feed(message.body?.output ?? ''));
+                    else if (cat === 'console' && output.startsWith('===DATALOG===')) {
+                        appendFiltered('\n\n' + output);
+                    }
                 },
                 onWillStopSession() {
                     appendFiltered(filter.flush());

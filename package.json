@@ -86,6 +86,11 @@
           "type": "boolean",
           "default": false,
           "description": "Also write extension analysis lines (files scanned, DataFrames found) to plog.log. Off by default; enable when debugging the extension."
+        },
+        "vscode-datalog.logTimestampLines": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write a [HH:MM:SS] varname: N obs x M vars summary line before each DATALOG entry. Off by default."
         }
       }
     }

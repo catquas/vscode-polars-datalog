@@ -42,6 +42,7 @@ function getConfig(): AnalyzerConfig & { enabled: boolean } & ExportConfig {
     sampleRows: cfg.get<number>('sampleRows', 1000),
     outputFolderAbsPath: wsRoot ? vscode.Uri.joinPath(wsRoot, sampleOutputFolder).fsPath : '',
     logFileAbsPath: currentLogFilePath,
+    logTimestampLines: cfg.get<boolean>('logTimestampLines', false),
   };
 }
 
@@ -59,6 +60,9 @@ async function syncAllPythonEditors(): Promise<void> {
   const editors = vscode.window.visibleTextEditors.filter(
     e => e.document.languageId === 'python'
   );
+  const totalBps = vscode.debug.breakpoints.length;
+  const purged = manager.purgeStale();
+  logLine(`  → purgeStale: ${totalBps} total breakpoints, removed ${purged} stale`);
   logLine(`Visible Python editors: ${editors.length}`);
 
   for (const editor of editors) {
@@ -99,11 +103,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.debug.onDidStartDebugSession(async (session) => {
-      logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
       if (!isPythonSession(session)) {
+        logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
         logLine('  → Not a Python/debugpy session, skipping.');
         return;
       }
+      // Clear the log file so each run starts fresh
+      if (currentLogFilePath) {
+        try { require('fs').writeFileSync(currentLogFilePath, ''); } catch { /* ignore */ }
+      }
+      logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
       logLine('  → Python session detected, syncing logpoints...');
       await syncAllPythonEditors();
     })
@@ -185,10 +194,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Capture stdout/stderr from Python debug sessions → plog.log ---
   //
   // We use a DebugAdapterTrackerFactory to intercept DAP 'output' events.
-  // Only 'stdout' and 'stderr' categories are written; 'console' is skipped
-  // because that is where evaluated logpoint expressions appear — they already
-  // write directly to plog.log via the Python side-effect expression, so
-  // capturing them here would duplicate entries.
+  // 'stdout' and 'stderr' carry normal program output and are written through
+  // TracebackFilter. 'console' is the DAP default category; we capture it only
+  // when it carries the '===DATALOG===' marker (logpoint evaluation results),
+  // writing verbatim. All other console output is ignored.
 
   context.subscriptions.push(
     vscode.debug.registerDebugAdapterTrackerFactory('*', {
@@ -213,9 +222,13 @@ export function activate(context: vscode.ExtensionContext): void {
         return {
           onDidSendMessage(message: { type: string; event?: string; body?: { category?: string; output?: string } }): void {
             if (message.type !== 'event' || message.event !== 'output') { return; }
-            const cat = message.body?.category ?? 'stdout';
-            if (cat !== 'stdout' && cat !== 'stderr') { return; }
-            appendFiltered(filter.feed(message.body?.output ?? ''));
+            const cat = message.body?.category ?? 'console';
+            const output = message.body?.output ?? '';
+            if (cat === 'stdout' || cat === 'stderr') {
+              appendFiltered(filter.feed(output));
+            } else if (cat === 'console' && output.startsWith('===DATALOG===')) {
+              appendFiltered('\n\n' + output);
+            }
           },
           onWillStopSession(): void {
             appendFiltered(filter.flush());

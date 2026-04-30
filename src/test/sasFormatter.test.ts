@@ -14,6 +14,7 @@ const noExport: ExportConfig = {
   sampleRows: 1000,
   outputFolderAbsPath: '',
   logFileAbsPath: '',
+  logTimestampLines: false,
 };
 
 const withCsv: ExportConfig = {
@@ -21,6 +22,7 @@ const withCsv: ExportConfig = {
   sampleRows: 1000,
   outputFolderAbsPath: '/workspace/worklib',
   logFileAbsPath: '',
+  logTimestampLines: false,
 };
 
 const withCsvAndLog: ExportConfig = {
@@ -28,6 +30,7 @@ const withCsvAndLog: ExportConfig = {
   sampleRows: 500,
   outputFolderAbsPath: '/workspace/worklib',
   logFileAbsPath: '/workspace/plog.log',
+  logTimestampLines: true,
 };
 
 const logOnly: ExportConfig = {
@@ -35,6 +38,7 @@ const logOnly: ExportConfig = {
   sampleRows: 1000,
   outputFolderAbsPath: '',
   logFileAbsPath: '/workspace/plog.log',
+  logTimestampLines: true,
 };
 
 // ---------------------------------------------------------------------------

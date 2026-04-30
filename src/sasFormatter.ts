@@ -5,6 +5,7 @@ export interface ExportConfig {
   sampleRows: number;
   outputFolderAbsPath: string;
   logFileAbsPath: string;
+  logTimestampLines: boolean;
 }
 
 /**
@@ -43,7 +44,7 @@ function shapeCols(varName: string): string {
 export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: ExportConfig): string {
   const parts: string[] = [];
 
-  parts.push('===DATALOG===');
+  parts.push('\n===DATALOG===');
   parts.push(`Code: ${escapeForLogpoint(assignment.sourceText)}`);
 
   for (const inputVar of assignment.inputVars) {
@@ -66,7 +67,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
     const n = exportConfig!.sampleRows;
 
     // Optional log-write action appended inside the tuple
-    const logAction = logPath
+    const logAction = (logPath && exportConfig?.logTimestampLines)
       ? `, open('${logPath}', 'a').write(` +
         `__import__('datetime').datetime.now().strftime('[%H:%M:%S] ') + ` +
         `'${v}: ' + str(_r[0]) + ' obs x ' + str(_r[1]) + ' vars\\n')`
@@ -79,8 +80,8 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
       `(__import__('pathlib').Path('${absPath}'), ${v}.shape) ` +
       `if hasattr(${v}, 'write_csv') else '→ LazyFrame, skipped'}`
     );
-  } else if (hasLog) {
-    // CSV disabled but log still requested
+  } else if (hasLog && exportConfig?.logTimestampLines) {
+    // CSV disabled but timestamp lines requested
     const logPath = exportConfig!.logFileAbsPath.replace(/\\/g, '/');
     const v = assignment.varName;
     parts.push(
@@ -91,5 +92,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
     );
   }
 
-  return parts.join(' | ');
+  // Break after the Code block so metadata stays on its own line
+  const [header, code, ...rest] = parts;
+  return `${header} | ${code}\n${rest.join(' | ')}`;
 }

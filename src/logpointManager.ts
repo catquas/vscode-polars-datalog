@@ -50,7 +50,7 @@ export class LogpointManager implements vscode.Disposable {
         new vscode.Location(uri, new vscode.Range(logLine, 0, logLine, 0)),
         true,
         undefined,
-        undefined,
+        '1',        // fire once per debug session; debugpy traces multi-line expressions multiple times
         logMessage
       );
 
@@ -68,6 +68,18 @@ export class LogpointManager implements vscode.Disposable {
       vscode.debug.removeBreakpoints(existing);
     }
     this.managedBreakpoints.delete(key);
+  }
+
+  purgeStale(): number {
+    // Use duck-typing instead of instanceof — VS Code may return proxy objects
+    // from vscode.debug.breakpoints that don't pass instanceof checks.
+    const stale = vscode.debug.breakpoints.filter(bp =>
+      (bp as vscode.SourceBreakpoint).logMessage?.includes('===DATALOG===')
+    );
+    if (stale.length > 0) {
+      vscode.debug.removeBreakpoints(stale);
+    }
+    return stale.length;
   }
 
   clearAll(): void {
