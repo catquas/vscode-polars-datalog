@@ -75,6 +75,6 @@ function buildLogMessage(assignment, exportConfig) {
     return `${header}${code}${rest.join(' ')}`;
 }
 function buildPrintVarLogMessage(varName) {
-    return `\n===DATALOG=== ${varName}= {repr(${varName})}`;
+    return `\n===DATALOG=== ${varName}={repr(${varName})}`;
 }
 //# sourceMappingURL=sasFormatter.js.map
