@@ -1,0 +1,5 @@
+1. Right-click a polars df variable name in python code editor, get an option in the list to open the corresponding csv, if it exists.
+2. Same, but in the plog.log file.
+3. Colors for plog.log: Lines starting with "Input dataframe" or "New Dataframe" have green text, or blue text.
+4. Remove stuff about sending error messages to plog.log file, it does not work anyway, and maybe it is slowing it down?
+5. Print statements which just have a variable name print to plog.log, in addition to terminal. Do not need to use tee, can just look at the print statement and get the value of the variable. For example, if the line is `print(username)`, then log should show `username="john_smith"`. If the line is print(maxquotient), log should show `maxquotient=234`.

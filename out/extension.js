@@ -5,7 +5,6 @@ exports.deactivate = deactivate;
 const vscode = require("vscode");
 const pythonAnalyzer_1 = require("./pythonAnalyzer");
 const logpointManager_1 = require("./logpointManager");
-const outputFilter_1 = require("./outputFilter");
 let manager;
 let log;
 let currentLogFilePath = '';
@@ -160,13 +159,10 @@ function activate(context) {
         await vscode.commands.executeCommand('workbench.view.explorer');
         await vscode.commands.executeCommand('revealInExplorer', folderUri);
     }));
-    // --- Capture stdout/stderr from Python debug sessions → plog.log ---
+    // --- Capture logpoint output from Python debug sessions → plog.log ---
     //
-    // We use a DebugAdapterTrackerFactory to intercept DAP 'output' events.
-    // 'stdout' and 'stderr' carry normal program output and are written through
-    // TracebackFilter. 'console' is the DAP default category; we capture it only
-    // when it carries the '===DATALOG===' marker (logpoint evaluation results),
-    // writing verbatim. All other console output is ignored.
+    // Intercept DAP 'output' events for the '===DATALOG===' marker that
+    // logpoint expressions emit, writing those verbatim to plog.log.
     context.subscriptions.push(vscode.debug.registerDebugAdapterTrackerFactory('*', {
         createDebugAdapterTracker(session) {
             if (!isPythonSession(session)) {
@@ -182,16 +178,6 @@ function activate(context) {
                 return undefined;
             }
             const logPath = vscode.Uri.joinPath(wsRoot, logFile).fsPath;
-            const filter = new outputFilter_1.TracebackFilter(wsRoot.fsPath);
-            function appendFiltered(text) {
-                if (!text) {
-                    return;
-                }
-                try {
-                    require('fs').appendFileSync(logPath, text);
-                }
-                catch { /* ignore */ }
-            }
             return {
                 onDidSendMessage(message) {
                     if (message.type !== 'event' || message.event !== 'output') {
@@ -199,15 +185,18 @@ function activate(context) {
                     }
                     const cat = message.body?.category ?? 'console';
                     const output = message.body?.output ?? '';
-                    if (cat === 'stdout' || cat === 'stderr') {
-                        appendFiltered(filter.feed(output));
+                    if (cat === 'stdout') {
+                        try {
+                            require('fs').appendFileSync(logPath, output);
+                        }
+                        catch { /* ignore */ }
                     }
                     else if (cat === 'console' && output.startsWith('===DATALOG===')) {
-                        appendFiltered('\n\n' + output);
+                        try {
+                            require('fs').appendFileSync(logPath, '\n\n' + output);
+                        }
+                        catch { /* ignore */ }
                     }
-                },
-                onWillStopSession() {
-                    appendFiltered(filter.flush());
                 },
             };
         },

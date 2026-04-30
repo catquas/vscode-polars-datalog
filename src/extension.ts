@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { analyzeFile, AnalyzerConfig } from './pythonAnalyzer';
 import { LogpointManager } from './logpointManager';
 import { ExportConfig } from './sasFormatter';
-import { TracebackFilter } from './outputFilter';
 
 // Available at runtime in VS Code's Node.js extension host; not in @types/vscode
 declare function require(id: string): any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -191,13 +190,10 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // --- Capture stdout/stderr from Python debug sessions → plog.log ---
+  // --- Capture logpoint output from Python debug sessions → plog.log ---
   //
-  // We use a DebugAdapterTrackerFactory to intercept DAP 'output' events.
-  // 'stdout' and 'stderr' carry normal program output and are written through
-  // TracebackFilter. 'console' is the DAP default category; we capture it only
-  // when it carries the '===DATALOG===' marker (logpoint evaluation results),
-  // writing verbatim. All other console output is ignored.
+  // Intercept DAP 'output' events for the '===DATALOG===' marker that
+  // logpoint expressions emit, writing those verbatim to plog.log.
 
   context.subscriptions.push(
     vscode.debug.registerDebugAdapterTrackerFactory('*', {
@@ -212,26 +208,16 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!logFile) { return undefined; }
         const logPath = vscode.Uri.joinPath(wsRoot, logFile).fsPath;
 
-        const filter = new TracebackFilter(wsRoot.fsPath);
-
-        function appendFiltered(text: string): void {
-          if (!text) { return; }
-          try { require('fs').appendFileSync(logPath, text); } catch { /* ignore */ }
-        }
-
         return {
           onDidSendMessage(message: { type: string; event?: string; body?: { category?: string; output?: string } }): void {
             if (message.type !== 'event' || message.event !== 'output') { return; }
             const cat = message.body?.category ?? 'console';
             const output = message.body?.output ?? '';
-            if (cat === 'stdout' || cat === 'stderr') {
-              appendFiltered(filter.feed(output));
+            if (cat === 'stdout') {
+              try { require('fs').appendFileSync(logPath, output); } catch { /* ignore */ }
             } else if (cat === 'console' && output.startsWith('===DATALOG===')) {
-              appendFiltered('\n\n' + output);
+              try { require('fs').appendFileSync(logPath, '\n\n' + output); } catch { /* ignore */ }
             }
-          },
-          onWillStopSession(): void {
-            appendFiltered(filter.flush());
           },
         };
       },
