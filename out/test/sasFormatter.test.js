@@ -86,16 +86,16 @@ const logOnly = {
 // Brace escaping in source text
 // ---------------------------------------------------------------------------
 (0, runner_1.suite)('buildLogMessage — brace escaping', () => {
-    (0, runner_1.test)('curly braces in source code are escaped', () => {
+    (0, runner_1.test)('curly braces in source code are escaped as chr() expressions', () => {
         const a = { ...base, sourceText: 'df = pl.DataFrame({"a": [1]})' };
         const msg = (0, sasFormatter_1.buildLogMessage)(a);
-        (0, runner_1.includes)(msg, '{{');
-        (0, runner_1.includes)(msg, '}}');
+        (0, runner_1.includes)(msg, '{chr(123)}');
+        (0, runner_1.includes)(msg, '{chr(125)}');
     });
-    (0, runner_1.test)('braces in source code are doubled in source section', () => {
+    (0, runner_1.test)('braces in source code replaced with chr() in source section', () => {
         const a = { ...base, sourceText: 'df = fn({"key": "val"})' };
         const msg = (0, sasFormatter_1.buildLogMessage)(a);
-        (0, runner_1.includes)(msg, '{{"key"');
+        (0, runner_1.includes)(msg, '{chr(123)}"key"');
     });
 });
 // ---------------------------------------------------------------------------
@@ -191,6 +191,38 @@ const logOnly = {
     (0, runner_1.test)('custom varName used in csv filename', () => {
         const a = { ...base, varName: 'other_df', inputVars: [] };
         (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(a, withCsv), "'other_df.csv'");
+    });
+});
+// ---------------------------------------------------------------------------
+// Source text line wrapping
+// ---------------------------------------------------------------------------
+(0, runner_1.suite)('buildLogMessage — source line wrapping', () => {
+    const longSource = `df = pl.DataFrame({'name': ['Alice', 'Bob', 'Charlie', 'David'], 'age': [25, 30, 35, 40], 'salary': [50000, 60000, 70000, 80000], 'department': ['HR', 'IT', 'IT', 'HR']})`;
+    (0, runner_1.test)('long source line is broken into multiple lines', () => {
+        const a = { ...base, sourceText: longSource, inputVars: [] };
+        const msg = (0, sasFormatter_1.buildLogMessage)(a);
+        (0, runner_1.ok)(msg.includes('\n'), 'contains newline breaks');
+        const srcLines = msg.split('\n').filter(l => l.includes('pl.DataFrame') || l.includes("'age'") || l.includes("'salary'") || l.includes("'department'"));
+        (0, runner_1.ok)(srcLines.length > 1, 'source split across multiple lines');
+    });
+    (0, runner_1.test)('no source line exceeds 90 chars', () => {
+        const a = { ...base, sourceText: longSource, inputVars: [] };
+        const msg = (0, sasFormatter_1.buildLogMessage)(a);
+        const over = msg.split('\n').filter(l => l.length > 90 && (l.includes('DataFrame') || l.includes("'age'")));
+        (0, runner_1.strictEqual)(over.length, 0);
+    });
+    (0, runner_1.test)('short source line is not wrapped', () => {
+        const a = { ...base, sourceText: 'x = pl.read_csv("f.csv")', inputVars: [] };
+        const msg = (0, sasFormatter_1.buildLogMessage)(a);
+        (0, runner_1.includes)(msg, 'x = pl.read_csv("f.csv")');
+    });
+    (0, runner_1.test)('all key names still present after wrapping', () => {
+        const a = { ...base, sourceText: longSource, inputVars: [] };
+        const msg = (0, sasFormatter_1.buildLogMessage)(a);
+        (0, runner_1.includes)(msg, "'name'");
+        (0, runner_1.includes)(msg, "'age'");
+        (0, runner_1.includes)(msg, "'salary'");
+        (0, runner_1.includes)(msg, "'department'");
     });
 });
 //# sourceMappingURL=sasFormatter.test.js.map

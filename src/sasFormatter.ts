@@ -13,7 +13,97 @@ export interface ExportConfig {
  * does not treat them as expression delimiters.
  */
 function escapeForLogpoint(text: string): string {
-  return text.replace(/\{/g, '{{').replace(/\}/g, '}}');
+  // VS Code logpoints treat { as expression-start, so we can't use {{ as an
+  // escape. Use Python chr() expressions instead. Single pass avoids the } in
+  // {chr(123)} being re-escaped by a second replacement.
+  return text.replace(/[{}]/g, ch => ch === '{' ? '{chr(123)}' : '{chr(125)}');
+}
+
+const WRAP_AT = 90;
+
+/**
+ * Return positions of all commas at the minimum bracket depth found (> 0),
+ * skipping commas inside string literals and comments.
+ * These are the "outermost" commas — dict keys, function args, list elements
+ * at the top-most nesting level present in the line.
+ */
+function outermostCommaPositions(line: string): number[] {
+  const found: { pos: number; depth: number }[] = [];
+  let depth = 0;
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if ((ch === '"' || ch === "'") && line[i + 1] === ch && line[i + 2] === ch) {
+      const q = line.slice(i, i + 3);
+      i += 3;
+      while (i < line.length) {
+        if (line[i] === '\\') { i += 2; }
+        else if (line.slice(i, i + 3) === q) { i += 3; break; }
+        else { i++; }
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const q = ch; i++;
+      while (i < line.length) {
+        if (line[i] === '\\') { i += 2; }
+        else if (line[i] === q) { i++; break; }
+        else { i++; }
+      }
+      continue;
+    }
+    if (ch === '#') { break; }
+    if (ch === '(' || ch === '[' || ch === '{') { depth++; }
+    else if (ch === ')' || ch === ']' || ch === '}') { depth--; }
+    else if (ch === ',' && depth > 0) { found.push({ pos: i, depth }); }
+    i++;
+  }
+  if (found.length === 0) { return []; }
+  const min = Math.min(...found.map(c => c.depth));
+  return found.filter(c => c.depth === min).map(c => c.pos);
+}
+
+/**
+ * Wrap a single long line at outermost commas so each output line stays
+ * under WRAP_AT characters. Returns the line unchanged if it already fits
+ * or has no breakable commas.
+ */
+function breakLongLine(line: string): string {
+  if (line.length <= WRAP_AT) { return line; }
+  const commas = outermostCommaPositions(line);
+  if (commas.length === 0) { return line; }
+
+  const baseIndent = (line.match(/^(\s*)/) ?? ['', ''])[1];
+  const contIndent = baseIndent + '    ';
+
+  // Split into segments; each segment (except the last) includes its trailing comma.
+  const segs: string[] = [];
+  let prev = 0;
+  for (const pos of commas) {
+    segs.push(line.slice(prev, pos + 1).trim());
+    prev = pos + 1;
+  }
+  segs.push(line.slice(prev).trim());
+
+  // Greedy: extend current line if it still fits, otherwise start a new one.
+  const outLines: string[] = [];
+  let cur = baseIndent + segs[0];
+  for (let j = 1; j < segs.length; j++) {
+    const candidate = cur + ' ' + segs[j];
+    if (candidate.length <= WRAP_AT) {
+      cur = candidate;
+    } else {
+      outLines.push(cur);
+      cur = contIndent + segs[j];
+    }
+  }
+  outLines.push(cur);
+  return outLines.join('\n');
+}
+
+/** Apply breakLongLine to every line in a (possibly multi-line) source text. */
+function wrapSourceText(text: string): string {
+  return text.split('\n').map(breakLongLine).join('\n');
 }
 
 /**
@@ -45,7 +135,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   const parts: string[] = [];
 
   parts.push('\n===DATALOG===');
-  parts.push(`\n${escapeForLogpoint(assignment.sourceText)}`);
+  parts.push(`\n${wrapSourceText(escapeForLogpoint(assignment.sourceText))}`);
 
   for (const inputVar of assignment.inputVars) {
     parts.push(

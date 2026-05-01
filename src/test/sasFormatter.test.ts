@@ -99,17 +99,17 @@ suite('buildLogMessage — input vars', () => {
 // Brace escaping in source text
 // ---------------------------------------------------------------------------
 suite('buildLogMessage — brace escaping', () => {
-  test('curly braces in source code are escaped', () => {
+  test('curly braces in source code are escaped as chr() expressions', () => {
     const a = { ...base, sourceText: 'df = pl.DataFrame({"a": [1]})' };
     const msg = buildLogMessage(a);
-    includes(msg, '{{');
-    includes(msg, '}}');
+    includes(msg, '{chr(123)}');
+    includes(msg, '{chr(125)}');
   });
 
-  test('braces in source code are doubled in source section', () => {
+  test('braces in source code replaced with chr() in source section', () => {
     const a = { ...base, sourceText: 'df = fn({"key": "val"})' };
     const msg = buildLogMessage(a);
-    includes(msg, '{{"key"');
+    includes(msg, '{chr(123)}"key"');
   });
 });
 
@@ -215,5 +215,42 @@ suite('buildLogMessage — variable name interpolation', () => {
   test('custom varName used in csv filename', () => {
     const a = { ...base, varName: 'other_df', inputVars: [] };
     includes(buildLogMessage(a, withCsv), "'other_df.csv'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source text line wrapping
+// ---------------------------------------------------------------------------
+suite('buildLogMessage — source line wrapping', () => {
+  const longSource = `df = pl.DataFrame({'name': ['Alice', 'Bob', 'Charlie', 'David'], 'age': [25, 30, 35, 40], 'salary': [50000, 60000, 70000, 80000], 'department': ['HR', 'IT', 'IT', 'HR']})`;
+
+  test('long source line is broken into multiple lines', () => {
+    const a = { ...base, sourceText: longSource, inputVars: [] };
+    const msg = buildLogMessage(a);
+    ok(msg.includes('\n'), 'contains newline breaks');
+    const srcLines = msg.split('\n').filter(l => l.includes('pl.DataFrame') || l.includes("'age'") || l.includes("'salary'") || l.includes("'department'"));
+    ok(srcLines.length > 1, 'source split across multiple lines');
+  });
+
+  test('no source line exceeds 90 chars', () => {
+    const a = { ...base, sourceText: longSource, inputVars: [] };
+    const msg = buildLogMessage(a);
+    const over = msg.split('\n').filter(l => l.length > 90 && (l.includes('DataFrame') || l.includes("'age'")));
+    strictEqual(over.length, 0);
+  });
+
+  test('short source line is not wrapped', () => {
+    const a = { ...base, sourceText: 'x = pl.read_csv("f.csv")', inputVars: [] };
+    const msg = buildLogMessage(a);
+    includes(msg, 'x = pl.read_csv("f.csv")');
+  });
+
+  test('all key names still present after wrapping', () => {
+    const a = { ...base, sourceText: longSource, inputVars: [] };
+    const msg = buildLogMessage(a);
+    includes(msg, "'name'");
+    includes(msg, "'age'");
+    includes(msg, "'salary'");
+    includes(msg, "'department'");
   });
 });
