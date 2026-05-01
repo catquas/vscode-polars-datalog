@@ -248,8 +248,47 @@ function activate(context) {
             vscode.window.showWarningMessage(`Datalog: No CSV found for "${varName}" in ${folder}/.`);
             return;
         }
-        const doc = await vscode.workspace.openTextDocument(csvUri);
-        await vscode.window.showTextDocument(doc, { preview: false });
+        await vscode.commands.executeCommand('vscode.open', csvUri);
+    }));
+    // --- plog.log line colorization ---
+    const plogBlue = vscode.window.createTextEditorDecorationType({
+        light: { color: '#0070C1' },
+        dark: { color: '#4FC1FF' },
+    });
+    context.subscriptions.push(plogBlue);
+    function applyPlogDecorations(editor) {
+        const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+        const logFile = cfg.get('logFile', 'plog.log');
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (!wsRoot || !logFile) {
+            return;
+        }
+        if (editor.document.uri.fsPath !== vscode.Uri.joinPath(wsRoot, logFile).fsPath) {
+            return;
+        }
+        const ranges = [];
+        for (let i = 0; i < editor.document.lineCount; i++) {
+            const text = editor.document.lineAt(i).text;
+            if (text.startsWith('Input dataframe') || text.startsWith('New dataframe')) {
+                ranges.push(editor.document.lineAt(i).range);
+            }
+        }
+        editor.setDecorations(plogBlue, ranges);
+    }
+    for (const editor of vscode.window.visibleTextEditors) {
+        applyPlogDecorations(editor);
+    }
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => {
+        if (editor) {
+            applyPlogDecorations(editor);
+        }
+    }));
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
+        for (const editor of vscode.window.visibleTextEditors) {
+            if (editor.document === event.document) {
+                applyPlogDecorations(editor);
+            }
+        }
     }));
 }
 function deactivate() {
