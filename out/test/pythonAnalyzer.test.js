@@ -103,6 +103,27 @@ const config = { polarsAlias: 'pl', dfNameSuffixes: ['_df', 'df', '_data'] };
         const r = (0, pythonAnalyzer_1.analyzeFile)('x = pd.DataFrame()', config); // pd ≠ pl
         (0, runner_1.strictEqual)(r.length, 0);
     });
+    (0, runner_1.test)('detects pl.scan_csv()', () => {
+        const r = (0, pythonAnalyzer_1.analyzeFile)('supra = pl.scan_csv("f.csv")', config);
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'supra');
+    });
+    (0, runner_1.test)('detects pl.scan_parquet()', () => {
+        const r = (0, pythonAnalyzer_1.analyzeFile)('x = pl.scan_parquet("f.parquet")', config);
+        (0, runner_1.strictEqual)(r.length, 1);
+    });
+    (0, runner_1.test)('detects pl.scan_ndjson()', () => {
+        const r = (0, pythonAnalyzer_1.analyzeFile)('x = pl.scan_ndjson("f.ndjson")', config);
+        (0, runner_1.strictEqual)(r.length, 1);
+    });
+    (0, runner_1.test)('collect() on scan_csv var is detected', () => {
+        const src = 'supra = pl.scan_csv("f.csv")\ndvar = supra.collect()';
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 2);
+        (0, runner_1.strictEqual)(r[0].varName, 'supra');
+        (0, runner_1.strictEqual)(r[1].varName, 'dvar');
+        (0, runner_1.deepEqual)(r[1].inputVars, ['supra']);
+    });
 });
 (0, runner_1.suite)('analyzeFile — method-chain heuristic', () => {
     (0, runner_1.test)('detects filter on known var', () => {
@@ -130,6 +151,30 @@ const config = { polarsAlias: 'pl', dfNameSuffixes: ['_df', 'df', '_data'] };
         const src = 'result = unknown.filter(True)';
         const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
         (0, runner_1.strictEqual)(r.length, 0);
+    });
+    (0, runner_1.test)('multi-line parenthesized chain on known var is detected', () => {
+        const src = [
+            'raw_df = pl.read_csv("f.csv")',
+            'result = (',
+            '    raw_df',
+            '    .filter(True)',
+            ').collect()',
+        ].join('\n');
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 2);
+        (0, runner_1.strictEqual)(r[1].varName, 'result');
+    });
+    (0, runner_1.test)('var from multi-line chain is tracked so downstream collect() is detected', () => {
+        const src = [
+            'raw_df = pl.read_csv("f.csv")',
+            'lazy = (',
+            '    raw_df.filter(True)',
+            ')',
+            'final = lazy.collect()',
+        ].join('\n');
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 3);
+        (0, runner_1.strictEqual)(r[2].varName, 'final');
     });
 });
 (0, runner_1.suite)('analyzeFile — multi-line assignments', () => {

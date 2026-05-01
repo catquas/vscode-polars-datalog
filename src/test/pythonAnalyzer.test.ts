@@ -120,6 +120,31 @@ suite('analyzeFile — polars constructor heuristic', () => {
     const r = analyzeFile('x = pd.DataFrame()', config); // pd ≠ pl
     strictEqual(r.length, 0);
   });
+
+  test('detects pl.scan_csv()', () => {
+    const r = analyzeFile('supra = pl.scan_csv("f.csv")', config);
+    strictEqual(r.length, 1);
+    strictEqual(r[0].varName, 'supra');
+  });
+
+  test('detects pl.scan_parquet()', () => {
+    const r = analyzeFile('x = pl.scan_parquet("f.parquet")', config);
+    strictEqual(r.length, 1);
+  });
+
+  test('detects pl.scan_ndjson()', () => {
+    const r = analyzeFile('x = pl.scan_ndjson("f.ndjson")', config);
+    strictEqual(r.length, 1);
+  });
+
+  test('collect() on scan_csv var is detected', () => {
+    const src = 'supra = pl.scan_csv("f.csv")\ndvar = supra.collect()';
+    const r = analyzeFile(src, config);
+    strictEqual(r.length, 2);
+    strictEqual(r[0].varName, 'supra');
+    strictEqual(r[1].varName, 'dvar');
+    deepEqual(r[1].inputVars, ['supra']);
+  });
 });
 
 suite('analyzeFile — method-chain heuristic', () => {
@@ -151,6 +176,32 @@ suite('analyzeFile — method-chain heuristic', () => {
     const src = 'result = unknown.filter(True)';
     const r = analyzeFile(src, config);
     strictEqual(r.length, 0);
+  });
+
+  test('multi-line parenthesized chain on known var is detected', () => {
+    const src = [
+      'raw_df = pl.read_csv("f.csv")',
+      'result = (',
+      '    raw_df',
+      '    .filter(True)',
+      ').collect()',
+    ].join('\n');
+    const r = analyzeFile(src, config);
+    strictEqual(r.length, 2);
+    strictEqual(r[1].varName, 'result');
+  });
+
+  test('var from multi-line chain is tracked so downstream collect() is detected', () => {
+    const src = [
+      'raw_df = pl.read_csv("f.csv")',
+      'lazy = (',
+      '    raw_df.filter(True)',
+      ')',
+      'final = lazy.collect()',
+    ].join('\n');
+    const r = analyzeFile(src, config);
+    strictEqual(r.length, 3);
+    strictEqual(r[2].varName, 'final');
   });
 });
 

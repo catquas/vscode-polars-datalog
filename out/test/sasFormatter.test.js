@@ -40,19 +40,19 @@ const logOnly = {
 // Core structure
 // ---------------------------------------------------------------------------
 (0, runner_1.suite)('buildLogMessage — structure', () => {
-    (0, runner_1.test)('starts with ===DATALOG===', () => {
+    (0, runner_1.test)('starts with newline then ===DATALOG===', () => {
         const msg = (0, sasFormatter_1.buildLogMessage)(base);
-        (0, runner_1.ok)(msg.startsWith('===DATALOG==='), 'header');
+        (0, runner_1.ok)(msg.startsWith('\n===DATALOG==='), 'header');
     });
-    (0, runner_1.test)('pipe-separates parts', () => {
+    (0, runner_1.test)('newline-separates sections', () => {
         const msg = (0, sasFormatter_1.buildLogMessage)(base);
-        (0, runner_1.ok)(msg.includes(' | '), 'pipe separator');
+        (0, runner_1.ok)(msg.includes('\n===DATALOG===\n'), 'newline separator');
     });
-    (0, runner_1.test)('includes Code: section', () => {
-        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base), 'Code:');
+    (0, runner_1.test)('source text appears directly (no Code: prefix)', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base), 'result_df = input_df.filter');
     });
-    (0, runner_1.test)('includes NOTE section', () => {
-        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base), 'NOTE: The data set result_df');
+    (0, runner_1.test)('includes New dataframe section', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base), 'New dataframe "result_df"');
     });
     (0, runner_1.test)('includes shape expression for output var', () => {
         const msg = (0, sasFormatter_1.buildLogMessage)(base);
@@ -85,11 +85,10 @@ const logOnly = {
         (0, runner_1.includes)(msg, '{{');
         (0, runner_1.includes)(msg, '}}');
     });
-    (0, runner_1.test)('braces in source code are doubled in Code: section', () => {
+    (0, runner_1.test)('braces in source code are doubled in source section', () => {
         const a = { ...base, sourceText: 'df = fn({"key": "val"})' };
         const msg = (0, sasFormatter_1.buildLogMessage)(a);
-        const codeSection = msg.split(' | ')[1]; // "Code: ..."
-        (0, runner_1.includes)(codeSection, '{{"key"');
+        (0, runner_1.includes)(msg, '{{"key"');
     });
 });
 // ---------------------------------------------------------------------------
@@ -119,7 +118,7 @@ const logOnly = {
     (0, runner_1.test)('has LazyFrame fallback text', () => (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withCsv), 'LazyFrame'));
     (0, runner_1.test)('no open() for log', () => (0, runner_1.notIncludes)((0, sasFormatter_1.buildLogMessage)(base, withCsv), "open('/workspace/plog.log'"));
     (0, runner_1.test)('mkdir call present', () => (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withCsv), 'mkdir'));
-    (0, runner_1.test)('→ CSV marker in expression', () => (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withCsv), '→ CSV'));
+    (0, runner_1.test)('→ marker in CSV expression', () => (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withCsv), '→ '));
 });
 // ---------------------------------------------------------------------------
 // CSV + log

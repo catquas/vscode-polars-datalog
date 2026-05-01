@@ -93,7 +93,7 @@ function isDataFrameAssignment(varName, rhs, knownDfVars, config) {
     }
     // Heuristic 2: RHS calls a Polars constructor
     const alias = escapeRegex(config.polarsAlias);
-    const constructorPattern = new RegExp(`${alias}\\.(DataFrame|read_csv|read_parquet|read_excel|read_json|from_pandas|concat)\\s*\\(`);
+    const constructorPattern = new RegExp(`${alias}\\.(DataFrame|read_csv|read_parquet|read_excel|read_json|from_pandas|concat|scan_csv|scan_parquet|scan_ipc|scan_ndjson|scan_delta)\\s*\\(`);
     if (constructorPattern.test(rhs)) {
         return true;
     }
@@ -105,7 +105,7 @@ function isDataFrameAssignment(varName, rhs, knownDfVars, config) {
         'fill_nan', 'drop_nulls', 'limit', 'slice', 'gather', 'transpose',
         'lazy', 'collect', 'pipe', 'with_row_index'
     ];
-    const methodPattern = new RegExp(`\\b(${[...knownDfVars].map(escapeRegex).join('|')})\\.(${dfMethods.join('|')})\\s*\\(`);
+    const methodPattern = new RegExp(`\\b(${[...knownDfVars].map(escapeRegex).join('|')})\\s*\\.(${dfMethods.join('|')})\\s*\\(`);
     if (knownDfVars.size > 0 && methodPattern.test(rhs)) {
         return true;
     }
@@ -143,12 +143,9 @@ function analyzeFile(source, config) {
             continue;
         }
         const varName = match[2];
-        const rhs = match[3];
-        if (!isDataFrameAssignment(varName, rhs, knownDfVars, config)) {
-            i++;
-            continue;
-        }
-        // Collect the full multi-line expression by tracking bracket depth
+        const indent = match[1];
+        // Collect the full multi-line expression before heuristic check so that
+        // patterns like `x = (\n  known_df.filter(...)\n).collect()` are recognised.
         const startLine = i;
         let endLine = i;
         let bracketDepth = countNetBrackets(line);
@@ -159,13 +156,15 @@ function analyzeFile(source, config) {
             sourceLines.push(nextLine.trimEnd());
             bracketDepth += countNetBrackets(nextLine);
         }
+        const fullRhs = sourceLines.join(' ');
+        if (!isDataFrameAssignment(varName, fullRhs, knownDfVars, config)) {
+            i = endLine + 1;
+            continue;
+        }
         // Reconstruct source text (trim common leading whitespace for display)
-        const indent = match[1];
         const sourceText = sourceLines
             .map(l => l.startsWith(indent) ? l.slice(indent.length) : l)
             .join('\n');
-        // Collect full RHS text for input var detection
-        const fullRhs = sourceLines.join(' ');
         const inputVars = findInputVars(fullRhs, knownDfVars);
         results.push({
             varName,

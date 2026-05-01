@@ -45,22 +45,22 @@ const logOnly: ExportConfig = {
 // Core structure
 // ---------------------------------------------------------------------------
 suite('buildLogMessage — structure', () => {
-  test('starts with ===DATALOG===', () => {
+  test('starts with newline then ===DATALOG===', () => {
     const msg = buildLogMessage(base);
-    ok(msg.startsWith('===DATALOG==='), 'header');
+    ok(msg.startsWith('\n===DATALOG==='), 'header');
   });
 
-  test('pipe-separates parts', () => {
+  test('newline-separates sections', () => {
     const msg = buildLogMessage(base);
-    ok(msg.includes(' | '), 'pipe separator');
+    ok(msg.includes('\n===DATALOG===\n'), 'newline separator');
   });
 
-  test('includes Code: section', () => {
-    includes(buildLogMessage(base), 'Code:');
+  test('source text appears directly (no Code: prefix)', () => {
+    includes(buildLogMessage(base), 'result_df = input_df.filter');
   });
 
-  test('includes NOTE section', () => {
-    includes(buildLogMessage(base), 'NOTE: The data set result_df');
+  test('includes New dataframe section', () => {
+    includes(buildLogMessage(base), 'New dataframe "result_df"');
   });
 
   test('includes shape expression for output var', () => {
@@ -98,11 +98,10 @@ suite('buildLogMessage — brace escaping', () => {
     includes(msg, '}}');
   });
 
-  test('braces in source code are doubled in Code: section', () => {
+  test('braces in source code are doubled in source section', () => {
     const a = { ...base, sourceText: 'df = fn({"key": "val"})' };
     const msg = buildLogMessage(a);
-    const codeSection = msg.split(' | ')[1]; // "Code: ..."
-    includes(codeSection, '{{"key"');
+    includes(msg, '{{"key"');
   });
 });
 
@@ -135,7 +134,7 @@ suite('buildLogMessage — CSV export only', () => {
   test('has LazyFrame fallback text', () => includes(buildLogMessage(base, withCsv), 'LazyFrame'));
   test('no open() for log', () => notIncludes(buildLogMessage(base, withCsv), "open('/workspace/plog.log'"));
   test('mkdir call present', () => includes(buildLogMessage(base, withCsv), 'mkdir'));
-  test('→ CSV marker in expression', () => includes(buildLogMessage(base, withCsv), '→ CSV'));
+  test('→ marker in CSV expression', () => includes(buildLogMessage(base, withCsv), '→ '));
 });
 
 // ---------------------------------------------------------------------------
