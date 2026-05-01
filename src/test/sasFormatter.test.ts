@@ -59,8 +59,10 @@ suite('buildLogMessage — structure', () => {
     includes(buildLogMessage(base), 'result_df = input_df.filter');
   });
 
-  test('includes New dataframe section', () => {
-    includes(buildLogMessage(base), 'New dataframe "result_df"');
+  test('includes New dataframe and New lazyframe in conditional', () => {
+    const msg = buildLogMessage(base);
+    includes(msg, 'New dataframe');
+    includes(msg, 'New lazyframe');
   });
 
   test('includes shape expression for output var', () => {
@@ -78,6 +80,12 @@ suite('buildLogMessage — input vars', () => {
     const msg = buildLogMessage(base);
     includes(msg, 'input_df.shape[0]');
     includes(msg, 'input_df');
+  });
+
+  test('input var label uses dataframe/lazyframe conditional', () => {
+    const msg = buildLogMessage(base);
+    includes(msg, 'Input dataframe');
+    includes(msg, 'Input lazyframe');
   });
 
   test('no shape expression for input var when inputVars is empty', () => {

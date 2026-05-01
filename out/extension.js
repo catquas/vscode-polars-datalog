@@ -269,7 +269,8 @@ function activate(context) {
         const ranges = [];
         for (let i = 0; i < editor.document.lineCount; i++) {
             const text = editor.document.lineAt(i).text;
-            if (text.startsWith('Input dataframe') || text.startsWith('New dataframe')) {
+            if (text.startsWith('Input dataframe') || text.startsWith('New dataframe') ||
+                text.startsWith('Input lazyframe') || text.startsWith('New lazyframe')) {
                 ranges.push(editor.document.lineAt(i).range);
             }
         }

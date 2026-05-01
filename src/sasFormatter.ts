@@ -48,11 +48,15 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   parts.push(`\n${escapeForLogpoint(assignment.sourceText)}`);
 
   for (const inputVar of assignment.inputVars) {
-    parts.push(`\nInput dataframe "${inputVar}" has ${shapeRows(inputVar)} rows and ${shapeCols(inputVar)} columns.`);
+    parts.push(
+      `\n{('Input lazyframe' if not hasattr(${inputVar}, 'shape') else 'Input dataframe')} ` +
+      `"${inputVar}" has ${shapeRows(inputVar)} rows and ${shapeCols(inputVar)} columns.`
+    );
   }
 
   parts.push(
-    `\nNew dataframe "${assignment.varName}" has ` +
+    `\n{('New lazyframe' if not hasattr(${assignment.varName}, 'shape') else 'New dataframe')} ` +
+    `"${assignment.varName}" has ` +
     `${shapeRows(assignment.varName)} rows and ` +
     `${shapeCols(assignment.varName)} columns.`
   );

@@ -51,8 +51,10 @@ const logOnly = {
     (0, runner_1.test)('source text appears directly (no Code: prefix)', () => {
         (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base), 'result_df = input_df.filter');
     });
-    (0, runner_1.test)('includes New dataframe section', () => {
-        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base), 'New dataframe "result_df"');
+    (0, runner_1.test)('includes New dataframe and New lazyframe in conditional', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base);
+        (0, runner_1.includes)(msg, 'New dataframe');
+        (0, runner_1.includes)(msg, 'New lazyframe');
     });
     (0, runner_1.test)('includes shape expression for output var', () => {
         const msg = (0, sasFormatter_1.buildLogMessage)(base);
@@ -68,6 +70,11 @@ const logOnly = {
         const msg = (0, sasFormatter_1.buildLogMessage)(base);
         (0, runner_1.includes)(msg, 'input_df.shape[0]');
         (0, runner_1.includes)(msg, 'input_df');
+    });
+    (0, runner_1.test)('input var label uses dataframe/lazyframe conditional', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base);
+        (0, runner_1.includes)(msg, 'Input dataframe');
+        (0, runner_1.includes)(msg, 'Input lazyframe');
     });
     (0, runner_1.test)('no shape expression for input var when inputVars is empty', () => {
         const a = { ...base, sourceText: 'result_df = pl.DataFrame()', inputVars: [] };
