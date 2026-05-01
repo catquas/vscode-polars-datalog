@@ -82,9 +82,33 @@ function escapeRegex(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 /**
+ * Scan source lines for functions annotated to return pl.DataFrame or pl.LazyFrame
+ * and return their names. Handles multi-line signatures by searching backward from
+ * the `->` annotation line to find the owning `def funcname(`.
+ */
+function findDfReturningFunctions(lines, config) {
+    const funcs = new Set();
+    const alias = escapeRegex(config.polarsAlias);
+    const returnTypeRe = new RegExp(`->\\s*${alias}\\.(DataFrame|LazyFrame)`);
+    const defRe = /def\s+(\w+)\s*\(/;
+    for (let i = 0; i < lines.length; i++) {
+        if (!returnTypeRe.test(lines[i])) {
+            continue;
+        }
+        for (let j = i; j >= Math.max(0, i - 20); j--) {
+            const m = defRe.exec(lines[j]);
+            if (m) {
+                funcs.add(m[1]);
+                break;
+            }
+        }
+    }
+    return funcs;
+}
+/**
  * Decide whether an assignment creates a DataFrame variable.
  */
-function isDataFrameAssignment(varName, rhs, knownDfVars, config) {
+function isDataFrameAssignment(varName, rhs, knownDfVars, config, dfReturningFuncs) {
     // Heuristic 1: variable name ends with a known suffix
     for (const suffix of config.dfNameSuffixes) {
         if (varName === suffix || varName.endsWith(suffix)) {
@@ -108,6 +132,17 @@ function isDataFrameAssignment(varName, rhs, knownDfVars, config) {
     const methodPattern = new RegExp(`\\b(${[...knownDfVars].map(escapeRegex).join('|')})\\s*\\.(${dfMethods.join('|')})\\s*\\(`);
     if (knownDfVars.size > 0 && methodPattern.test(rhs)) {
         return true;
+    }
+    // Heuristic 4: subscript access followed by a DataFrame method (e.g. libs["df"].filter(...))
+    const subscriptMethodPattern = new RegExp(`\\[.*?\\]\\s*\\.(${dfMethods.join('|')})\\s*\\(`);
+    if (subscriptMethodPattern.test(rhs)) {
+        return true;
+    }
+    // Heuristic 5: call to a function declared -> pl.DataFrame / pl.LazyFrame
+    for (const fn of dfReturningFuncs) {
+        if (new RegExp(`\\b${escapeRegex(fn)}\\s*\\(`).test(rhs)) {
+            return true;
+        }
     }
     return false;
 }
@@ -134,6 +169,7 @@ function analyzeFile(source, config) {
     const lines = source.replace(/\r/g, '').split('\n');
     const results = [];
     const knownDfVars = new Set();
+    const dfReturningFuncs = findDfReturningFunctions(lines, config);
     let i = 0;
     while (i < lines.length) {
         const line = lines[i];
@@ -157,7 +193,7 @@ function analyzeFile(source, config) {
             bracketDepth += countNetBrackets(nextLine);
         }
         const fullRhs = sourceLines.join(' ');
-        if (!isDataFrameAssignment(varName, fullRhs, knownDfVars, config)) {
+        if (!isDataFrameAssignment(varName, fullRhs, knownDfVars, config, dfReturningFuncs)) {
             i = endLine + 1;
             continue;
         }

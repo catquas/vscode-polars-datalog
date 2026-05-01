@@ -164,6 +164,18 @@ const config = { polarsAlias: 'pl', dfNameSuffixes: ['_df', 'df', '_data'] };
         (0, runner_1.strictEqual)(r.length, 2);
         (0, runner_1.strictEqual)(r[1].varName, 'result');
     });
+    (0, runner_1.test)('subscript access + DataFrame method is detected', () => {
+        const src = 'result = libs["df"].filter(True)';
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'result');
+    });
+    (0, runner_1.test)('multi-line subscript chain is detected', () => {
+        const src = 'result = (\n    libs["df"]\n    .filter(True)\n)';
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'result');
+    });
     (0, runner_1.test)('var from multi-line chain is tracked so downstream collect() is detected', () => {
         const src = [
             'raw_df = pl.read_csv("f.csv")',
@@ -175,6 +187,49 @@ const config = { polarsAlias: 'pl', dfNameSuffixes: ['_df', 'df', '_data'] };
         const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
         (0, runner_1.strictEqual)(r.length, 3);
         (0, runner_1.strictEqual)(r[2].varName, 'final');
+    });
+});
+(0, runner_1.suite)('analyzeFile — annotated function return type', () => {
+    (0, runner_1.test)('function annotated -> pl.DataFrame is detected', () => {
+        const src = [
+            'def build_df() -> pl.DataFrame:',
+            '    return pl.DataFrame()',
+            'result = build_df()',
+        ].join('\n');
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'result');
+    });
+    (0, runner_1.test)('function annotated -> pl.LazyFrame is detected', () => {
+        const src = [
+            'def build_lazy() -> pl.LazyFrame:',
+            '    return pl.scan_csv("f.csv")',
+            'result = build_lazy()',
+        ].join('\n');
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'result');
+    });
+    (0, runner_1.test)('multi-line function signature -> pl.DataFrame is detected', () => {
+        const src = [
+            'def buildit(',
+            '    libs: dict,',
+            ') -> pl.DataFrame:',
+            '    return pl.DataFrame()',
+            'mdiff = buildit(libs)',
+        ].join('\n');
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'mdiff');
+    });
+    (0, runner_1.test)('unannotated function call is NOT detected', () => {
+        const src = [
+            'def some_func(x):',
+            '    return x',
+            'result = some_func(data)',
+        ].join('\n');
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
+        (0, runner_1.strictEqual)(r.length, 0);
     });
 });
 (0, runner_1.suite)('analyzeFile — multi-line assignments', () => {
