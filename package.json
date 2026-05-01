@@ -9,7 +9,8 @@
   "categories": ["Debuggers", "Other"],
   "activationEvents": [
     "onDebugSessionStart",
-    "onLanguage:python"
+    "onLanguage:python",
+    "onCommand:vscode-datalog.openCsvForVar"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -29,8 +30,21 @@
       {
         "command": "vscode-datalog.openPlog",
         "title": "Datalog: Open plog.log"
+      },
+      {
+        "command": "vscode-datalog.openCsvForVar",
+        "title": "Datalog: Open CSV for Variable"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "vscode-datalog.openCsvForVar",
+          "when": "editorLangId == python || resourceFilename == plog.log",
+          "group": "navigation"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "vscode-datalog.focusWorklib",

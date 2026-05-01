@@ -45,8 +45,8 @@ function buildLogMessage(assignment, exportConfig) {
     const hasCsv = !!(exportConfig?.exportSamples && exportConfig.outputFolderAbsPath);
     const hasLog = !!(exportConfig?.logFileAbsPath);
     if (hasCsv) {
-        const absPath = exportConfig.outputFolderAbsPath.replace(/\\/g, '/');
-        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/');
+        const absPath = exportConfig.outputFolderAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
+        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
         const v = assignment.varName;
         const n = exportConfig.sampleRows;
         // Optional log-write action appended inside the tuple
@@ -63,7 +63,7 @@ function buildLogMessage(assignment, exportConfig) {
     }
     else if (hasLog && exportConfig?.logTimestampLines) {
         // CSV disabled but timestamp lines requested
-        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/');
+        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
         const v = assignment.varName;
         parts.push(`{open('${logPath}', 'a').write(` +
             `__import__('datetime').datetime.now().strftime('[%H:%M:%S] ') + ` +

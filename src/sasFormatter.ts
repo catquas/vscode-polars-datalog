@@ -61,8 +61,8 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   const hasLog = !!(exportConfig?.logFileAbsPath);
 
   if (hasCsv) {
-    const absPath = exportConfig!.outputFolderAbsPath.replace(/\\/g, '/');
-    const logPath = exportConfig!.logFileAbsPath.replace(/\\/g, '/');
+    const absPath = exportConfig!.outputFolderAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
+    const logPath = exportConfig!.logFileAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
     const v = assignment.varName;
     const n = exportConfig!.sampleRows;
 
@@ -82,7 +82,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
     );
   } else if (hasLog && exportConfig?.logTimestampLines) {
     // CSV disabled but timestamp lines requested
-    const logPath = exportConfig!.logFileAbsPath.replace(/\\/g, '/');
+    const logPath = exportConfig!.logFileAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
     const v = assignment.varName;
     parts.push(
       `{open('${logPath}', 'a').write(` +

@@ -245,6 +245,38 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.window.showTextDocument(doc, { preview: false });
     })
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('vscode-datalog.openCsvForVar', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage('Datalog: No active editor.');
+        return;
+      }
+      const wordRange = editor.document.getWordRangeAtPosition(editor.selection.active);
+      const varName = wordRange ? editor.document.getText(wordRange) : '';
+      if (!varName) {
+        vscode.window.showWarningMessage('Datalog: No variable name under cursor.');
+        return;
+      }
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+      if (!wsRoot) {
+        vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
+        return;
+      }
+      const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+      const folder = cfg.get<string>('sampleOutputFolder', 'worklib');
+      const csvUri = vscode.Uri.joinPath(wsRoot, folder, `${varName}.csv`);
+      try {
+        await vscode.workspace.fs.stat(csvUri);
+      } catch {
+        vscode.window.showWarningMessage(`Datalog: No CSV found for "${varName}" in ${folder}/.`);
+        return;
+      }
+      const doc = await vscode.workspace.openTextDocument(csvUri);
+      await vscode.window.showTextDocument(doc, { preview: false });
+    })
+  );
 }
 
 export function deactivate(): void {
