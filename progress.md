@@ -10,173 +10,126 @@
 
 ### Removed `hitCount='1'` from `src/logpointManager.ts` ✅
 - Changed both `SourceBreakpoint` calls from `hitCount='1'` to `hitCount=undefined`
-- This did NOT fix the `microdifs` scope error (hitCount was not the root cause)
-- Keeping it removed is still correct — hitCount='1' prevented re-fires in loops which we want
+- Keeping it removed is correct — hitCount='1' prevented re-fires in loops
+
+### Removed leading `\n` from sasFormatter.ts ✅ (partial fix only)
+- `parts.push('\n===DATALOG===')` → `parts.push('===DATALOG===')`
+- Two tests in `sasFormatter.test.ts` updated to match
+- 99 tests pass
+- **BUT**: this alone does not fix plog.log — see root cause below
 
 ---
 
-## Active Bug: `microdifs` shows `name 'microdifs' is not defined`
+## CONFIRMED ROOT CAUSE: DAP Tracker Cannot Capture Logpoint Output
 
-### Test file: `C:\Users\brent\pythontest\functiony.py`
+### What we found (from diagnostic session)
+
+After adding `[DAP tracker] created` and `[DAP output]` logging to the tracker in `extension.ts`, the Output Channel showed:
+
+- `name 'my_df' is not defined` and `name 'df' is not defined` via **stdout** DAP events
+- **Zero** console DAP events containing `===DATALOG===`
+
+**Conclusion: VS Code does NOT send logpoint output as DAP console events.** VS Code evaluates the logpoint message internally and displays it in the debug console without routing it through the DAP adapter protocol. The tracker's `onDidSendMessage` never sees the assembled DATALOG block.
+
+Only **errors** from failed logpoint expression evaluations leak through as `stdout` DAP events (because debugpy writes those to Python's stdout stream).
+
+### What this means
+
+- The `output.startsWith('===DATALOG===')` check in the tracker can never match because that event never arrives.
+- The `\n` fix (Issue 1 from old analysis) was irrelevant — even without `\n`, there is no console event to capture.
+- plog.log will always be empty with the current DAP-tracker approach.
+- The DAP tracker can be removed or left in place (harmless but useless for logpoint output).
+
+### Why NameErrors appear even for module-level variables
+
+Test file `simpleworksmanually.py`:
 ```python
-def buildit(
-    libs: dict[str, pl.DataFrame],
-) -> pl.DataFrame:
-    microdifs = (          # lines 21–33 (1-based)
-        libs["df"]
-        .filter(...)
-        .unique()
-        .sort([...])
-    )                      # closes at line 33
-    x=1                    # line 34 ← logpoint placed HERE by extension
-    return microdifs       # line 35
+import polars as pl
 
-libs = build_libs()
-mdiff = buildit(libs)      # line 37
-mp = mdiff.filter(...)     # line 38
-x=1                        # line 39 (module level)
+def get_data():
+    df = pl.DataFrame({"ID": [1,2,3], ...})   # lines 6-10
+    return df
+
+my_df = get_data()   # line 14
+x=1                  # line 15 ← logpoint placed here
 ```
 
-### Log capture mechanism (from `src/extension.ts`)
-The extension uses a DAP adapter tracker to intercept debugpy output events:
-```typescript
-if (cat === 'stdout') {
-  appendFileSync(logPath, output);  // all stdout goes to log
-} else if (cat === 'console' && output.startsWith('===DATALOG===')) {
-  appendFileSync(logPath, '\n\n' + output);  // DATALOG console events
-}
-```
+- `df` is **function-local** (inside `get_data`) → same scope issue as `microdifs`
+- `my_df` is **module-level** → logpoint at line 15, but STILL shows NameError
 
-The logpoint message (from `sasFormatter.ts`) starts with `'\n===DATALOG==='`.
-This means the DAP output event's `output` field starts with `\n`, NOT `===DATALOG===`.
-So the console check `output.startsWith('===DATALOG===')` **FAILS** for the microdifs logpoint.
-
-### What actually appears in plog.log and why
-```
-===DATALOG===
-df = pl.DataFrame({...})                     ← df logpoint (console, captured)
-New dataframe "df" has 4 rows and 4 cols.
-name 'microdifs' is not defined              ← error from microdifs logpoint (stdout, always captured)
-
-===DATALOG===
-mdiff = buildit(libs)                        ← mdiff logpoint (console, captured)
-...
-```
-
-The microdifs logpoint IS firing at line 34 inside `buildit`. Its main output
-(`===DATALOG===` + source code + "Input dataframe df..." lines) is silently LOST because
-the leading `\n` in the message causes the console capture to miss it. Only the expression
-**error** leaks through as stdout.
-
-### Why `microdifs` is not accessible — the real root cause
-
-User confirmed: a MANUALLY-placed VS Code logpoint on line 34 (`x=1` inside `buildit`)
-with expression `open('debug_log.txt', 'a').write(str(microdifs))` WORKS.
-
-The extension's logpoint is at the SAME LINE but fails. Key differences:
-- User's logpoint: **one single `{expr}` block**
-- Extension's logpoint: **many separate `{expr}` blocks** across one big string
-
-VS Code evaluates each `{expr}` block by sending a separate `evaluate` request to debugpy.
-These requests may be processed **after Python has resumed execution** past the logpoint line.
-For a logpoint (non-stopping), Python may have returned from `buildit` by the time later
-`{expr}` blocks are evaluated.
-
-Evidence: `df` (a module-level global) IS accessible in earlier expressions even when later
-ones fail. Globals survive function return; locals do not.
-
-**Root cause: multi-`{expr}` logpoint messages cause later expressions to be evaluated after
-the function frame has been destroyed.**
-
-The `df` expressions (expressions 1–3) happen to evaluate while the frame is still active
-(or `df` is accessible as a global even after). The `microdifs` expressions (4–7) are
-evaluated after `buildit` has returned.
+The `my_df` NameError is puzzling but consistent with the multi-`{expr}` timing issue:
+VS Code sends separate evaluate requests per `{expr}` block and Python resumes between them.
+Even module-level variables can be undefined if the evaluate requests are processed in a
+later, different execution context. OR: `my_df` is defined but `get_data()` returns a
+regular DataFrame, and there is some other expression that fails.
 
 ---
 
-## Two Issues to Fix
+## The Fix: Single-Lambda Redesign (confirmed correct approach)
 
-### Issue 1: Leading `\n` causes main output to be silently dropped
-**File**: `src/sasFormatter.ts` line 137  
-**Current**: `parts.push('\n===DATALOG===');`  
-**Fix**: `parts.push('===DATALOG===');` (remove leading `\n`)  
-Also adjust surrounding formatting so the block doesn't run together with previous output.
+### Core principle
 
-### Issue 2: Multiple `{expr}` blocks — later ones evaluate after function returns
-**Root fix**: Rewrite `buildLogMessage()` in `src/sasFormatter.ts` to use a **single `{expr}` block**
-that captures ALL local variables immediately via lambda default arguments, then formats
-the full log message as a string.
+Replace all the separate `{expr}` blocks with **one single `{expr}` block** that:
+1. Captures all needed variables via **lambda default arguments** at evaluation time
+2. Writes the full DATALOG block directly to `plog.log` via Python file I/O
+3. Writes the CSV to `worklib/` as a side effect
+4. Returns a brief summary string for the VS Code debug console display
 
-**Pattern** (lambda-default-arg trick forces locals capture at first eval moment):
+Because all default args are evaluated **when the single lambda expression is evaluated**
+(i.e., when the first and only evaluate request fires, before Python resumes), all local
+variables are still in scope.
+
+### Pattern
+
 ```python
-{(lambda _out=microdifs, _in_df=df: (
-    'New dataframe "microdifs" has ' + str(_out.shape[0] if hasattr(_out,'shape') else '?') + ' rows'
-))()}
-```
-
-**Alternative simpler approach**: Write all output directly to the log file inside one expression,
-the same way the CSV export already works. A single lambda captures everything at once:
-```python
-{(lambda _out=microdifs, _in_df=df:
-  open('C:/path/to/plog.log', 'a').write(
-    'New dataframe "microdifs"...\n'
-  ) and '→ logged'
+{(lambda _out=varName, _in0=inputVar0, _logpath='C:/path/plog.log', _csvdir='C:/path/worklib':
+  __import__('builtins').open(_logpath, 'a').write(
+    '===DATALOG===\n' +
+    'source code here\n' +
+    'Input dataframe "inputVar0" has ' + str(getattr(_in0, 'shape', ('?','?'))[0]) + ' rows...\n' +
+    'New dataframe "varName" has ' + str(getattr(_out, 'shape', ('?','?'))[0]) + ' rows...\n'
+  ) and (
+    (lambda _d=__import__('pathlib').Path(_csvdir):
+      (_d.mkdir(parents=True, exist_ok=True),
+       _out.head(1000).write_csv(str(_d / 'varName.csv')))
+      and 'varName.csv written'
+    )() if hasattr(_out, 'write_csv') else '→ LazyFrame'
+  )
 )()}
 ```
 
----
+### What to keep vs. remove
 
-## Proposed Redesign of `buildLogMessage()` in `src/sasFormatter.ts`
+| Thing | Action |
+|-------|--------|
+| DAP tracker `onDidSendMessage` handler | Remove (it never sees logpoint output) |
+| `buildLogMessage()` in `sasFormatter.ts` | Rewrite to produce single-lambda string |
+| `sasFormatter.test.ts` | Update to test the new single-lambda output |
+| `logpointManager.ts` | No changes needed |
+| `pythonAnalyzer.ts` | No changes needed |
 
-### Strategy
-Replace the current multi-`{expr}` approach with a **single large lambda expression** that:
-1. Captures all variables via default args: `_out=microdifs, _in_df0=df, ...`
-2. Formats the entire log block as a Python string
-3. Writes it to the log file as a side effect (replacing the tracker-based capture)
-4. Returns a brief summary for the VS Code debug console
+### Diagnostic code to clean up first
 
-### What to write to the log file
-The same content as today, but written via `open(logPath, 'a').write(...)` inside
-the single lambda — bypassing the DAP tracker entirely.
-
-### Advantages
-- One `{expr}` block → evaluated immediately in the correct frame
-- Local variables captured before Python resumes
-- No leading `\n` capture issue (we can remove the DAP tracker capture entirely,
-  or keep it as fallback for the brief summary string returned by the expression)
-
-### Disadvantages / risks
-- `sasFormatter.ts` needs significant rewrite
-- `sasFormatter.test.ts` needs substantial test updates  
-- The expression becomes longer and harder to read
-
----
-
-## Files to Change
-
-| File | Change needed |
-|------|---------------|
-| `src/sasFormatter.ts` | Rewrite `buildLogMessage()` to use single-lambda pattern; remove leading `\n` |
-| `src/test/sasFormatter.test.ts` | Update all expression-format tests to match new output |
-| `src/extension.ts` | Optionally: remove or simplify the DAP tracker if log is written directly by expression |
-| `src/logpointManager.ts` | No changes needed (hitCount already fixed) |
-| `src/pythonAnalyzer.ts` | No changes needed |
-
----
-
-## Alternative: Try `locals()` wrapper first (simpler, might not work)
-
-Before the big rewrite, try wrapping variable references in `locals().get()`:
-```python
-{(lambda _v=locals().get('microdifs'): _v.shape[0] if hasattr(_v,'shape') else '?')()}
+`src/extension.ts` currently has temporary diagnostic logging added:
+```typescript
+log.appendLine(`[DAP tracker] created for session "${session.name}"`);
+// and inside onDidSendMessage:
+log.appendLine(`[DAP output] cat=${cat} starts=${JSON.stringify(output.slice(0, 60))}`);
 ```
-`locals()` in a lambda default arg runs at lambda-definition time (same as the single-expr approach).
-If the issue is truly that later `{expr}` blocks evaluate after frame exit, this won't help
-(because the block itself still runs late). But if the issue is just fast-locals sync,
-this would fix it with minimal code changes.
+Remove these before the real fix.
 
-**Try this first** before the full redesign. If it works, only `sasFormatter.ts`
-helper functions change slightly. If it doesn't work, do the full single-lambda redesign.
+---
+
+## Current File States
+
+| File | Status |
+|------|--------|
+| `src/sasFormatter.ts` | `\n` removed from line 137 — compiled ✅ |
+| `src/test/sasFormatter.test.ts` | 2 tests updated — compiled ✅ |
+| `src/extension.ts` | Has diagnostic logging — needs cleanup + DAP tracker simplification |
+| `src/logpointManager.ts` | hitCount fix in place — compiled ✅ |
+| `src/pythonAnalyzer.ts` | No changes needed |
+| `out/` | All recompiled via `npm test` — 99/99 tests pass |
 
 ---
 
@@ -188,5 +141,8 @@ helper functions change slightly. If it doesn't work, do the full single-lambda 
 | Logpoint expression builder | `src/sasFormatter.ts` |
 | Logpoint placement | `src/logpointManager.ts` |
 | Python analysis | `src/pythonAnalyzer.ts` |
-| Test file | `C:\Users\brent\pythontest\functiony.py` |
+| Test suite | `src/test/sasFormatter.test.ts` |
+| Python test file (simple) | `C:\Users\brent\pythontest\simpleworksmanually.py` |
+| Python test file (function) | `C:\Users\brent\pythontest\functiony.py` |
 | Log file | `C:\Users\brent\pythontest\plog.log` |
+| Old working log (reference) | `C:\Users\brent\pythontest\plog-fixed.log` |

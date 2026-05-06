@@ -2,22 +2,18 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildLogMessage = buildLogMessage;
 exports.buildPrintVarLogMessage = buildPrintVarLogMessage;
-/**
- * Escape literal { and } in text so VS Code logpoint interpolation
- * does not treat them as expression delimiters.
- */
-function escapeForLogpoint(text) {
-    // VS Code logpoints treat { as expression-start, so we can't use {{ as an
-    // escape. Use Python chr() expressions instead. Single pass avoids the } in
-    // {chr(123)} being re-escaped by a second replacement.
-    return text.replace(/[{}]/g, ch => ch === '{' ? '{chr(123)}' : '{chr(125)}');
-}
 const WRAP_AT = 90;
+const DEFAULT_SAMPLE_ROWS = 1000;
+const MAX_SAMPLE_ROWS = 100000;
+function safeSampleRows(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return DEFAULT_SAMPLE_ROWS;
+    }
+    return Math.max(0, Math.min(Math.trunc(value), MAX_SAMPLE_ROWS));
+}
 /**
  * Return positions of all commas at the minimum bracket depth found (> 0),
  * skipping commas inside string literals and comments.
- * These are the "outermost" commas — dict keys, function args, list elements
- * at the top-most nesting level present in the line.
  */
 function outermostCommaPositions(line) {
     const found = [];
@@ -79,11 +75,6 @@ function outermostCommaPositions(line) {
     const min = Math.min(...found.map(c => c.depth));
     return found.filter(c => c.depth === min).map(c => c.pos);
 }
-/**
- * Wrap a single long line at outermost commas so each output line stays
- * under WRAP_AT characters. Returns the line unchanged if it already fits
- * or has no breakable commas.
- */
 function breakLongLine(line) {
     if (line.length <= WRAP_AT) {
         return line;
@@ -94,7 +85,6 @@ function breakLongLine(line) {
     }
     const baseIndent = (line.match(/^(\s*)/) ?? ['', ''])[1];
     const contIndent = baseIndent + '    ';
-    // Split into segments; each segment (except the last) includes its trailing comma.
     const segs = [];
     let prev = 0;
     for (const pos of commas) {
@@ -102,7 +92,6 @@ function breakLongLine(line) {
         prev = pos + 1;
     }
     segs.push(line.slice(prev).trim());
-    // Greedy: extend current line if it still fits, otherwise start a new one.
     const outLines = [];
     let cur = baseIndent + segs[0];
     for (let j = 1; j < segs.length; j++) {
@@ -118,78 +107,117 @@ function breakLongLine(line) {
     outLines.push(cur);
     return outLines.join('\n');
 }
-/** Apply breakLongLine to every line in a (possibly multi-line) source text. */
 function wrapSourceText(text) {
     return text.split('\n').map(breakLongLine).join('\n');
 }
-/**
- * Build a Python expression that evaluates to the row count of varName,
- * or '?' if the variable doesn't have a .shape attribute.
- */
-function shapeRows(varName) {
-    return `{${varName}.shape[0] if hasattr(${varName}, 'shape') else '?'}`;
+function normalizePathForPython(path) {
+    return path.replace(/\\/g, '/');
 }
 /**
- * Build a Python expression that evaluates to the column count of varName,
- * or '?' if the variable doesn't have a .shape attribute.
+ * Build a Python string expression without literal braces. VS Code logpoints
+ * use braces as expression delimiters even when the brace appears in a Python
+ * string literal, so source braces become chr(123)/chr(125) pieces.
  */
-function shapeCols(varName) {
-    return `{${varName}.shape[1] if hasattr(${varName}, 'shape') else '?'}`;
+function pyStringExpr(text) {
+    const parts = [];
+    let current = '';
+    function flush() {
+        if (current.length > 0) {
+            parts.push(`'${current}'`);
+            current = '';
+        }
+    }
+    for (const ch of text) {
+        if (ch === '{') {
+            flush();
+            parts.push('chr(123)');
+        }
+        else if (ch === '}') {
+            flush();
+            parts.push('chr(125)');
+        }
+        else if (ch === '\\') {
+            current += '\\\\';
+        }
+        else if (ch === "'") {
+            current += "\\'";
+        }
+        else if (ch === '\n') {
+            current += '\\n';
+        }
+        else if (ch === '\r') {
+            current += '\\r';
+        }
+        else if (ch === '\t') {
+            current += '\\t';
+        }
+        else {
+            current += ch;
+        }
+    }
+    flush();
+    return parts.length > 0 ? parts.join(' + ') : "''";
 }
 /**
  * Build a SAS-style logpoint message for a DataFrame assignment.
  *
- * Example output:
- *   ===DATALOG=== | Code: result_df = input_df.filter(pl.col("age") > 25) |
- *   input_df: {input_df.shape[0] if ...} obs x {input_df.shape[1] if ...} vars |
- *   NOTE: The data set result_df has {result_df.shape[0] if ...} observations
- *         and {result_df.shape[1] if ...} variables.
+ * The logpoint contains exactly one runtime expression. It captures all local
+ * values as lambda default arguments before Python resumes, writes plog.log and
+ * CSV samples as side effects, then returns the full block for the Debug Console.
  */
 function buildLogMessage(assignment, exportConfig) {
-    const parts = [];
-    parts.push('\n===DATALOG===');
-    parts.push(`\n${wrapSourceText(escapeForLogpoint(assignment.sourceText))}`);
-    for (const inputVar of assignment.inputVars) {
-        parts.push(`\n{('Input lazyframe' if not hasattr(${inputVar}, 'shape') else 'Input dataframe')} ` +
-            `"${inputVar}" has ${shapeRows(inputVar)} rows and ${shapeCols(inputVar)} columns.`);
-    }
-    parts.push(`\n{('New lazyframe' if not hasattr(${assignment.varName}, 'shape') else 'New dataframe')} ` +
-        `"${assignment.varName}" has ` +
-        `${shapeRows(assignment.varName)} rows and ` +
-        `${shapeCols(assignment.varName)} columns.`);
+    const v = assignment.varName;
+    const inputs = assignment.inputVars;
     const hasCsv = !!(exportConfig?.exportSamples && exportConfig.outputFolderAbsPath);
-    const hasLog = !!(exportConfig?.logFileAbsPath);
-    if (hasCsv) {
-        const absPath = exportConfig.outputFolderAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
-        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
-        const v = assignment.varName;
-        const n = exportConfig.sampleRows;
-        // Optional log-write action appended inside the tuple
-        const logAction = (logPath && exportConfig?.logTimestampLines)
-            ? `, open('${logPath}', 'a').write(` +
-                `__import__('datetime').datetime.now().strftime('[%H:%M:%S] ') + ` +
-                `'${v}: ' + str(_r[0]) + ' obs x ' + str(_r[1]) + ' vars\\n')`
-            : '';
-        parts.push(`{(lambda _d, _r: (_d.mkdir(parents=True, exist_ok=True), ` +
-            `${v}.head(${n}).write_csv(str(_d / '${v}.csv'))${logAction}) ` +
-            `and ('→ ' + str('${v}.csv')))` +
-            `(__import__('pathlib').Path('${absPath}'), ${v}.shape) ` +
-            `if hasattr(${v}, 'write_csv') else '→ LazyFrame, skipped'}`);
+    const hasLog = !!exportConfig?.logFileAbsPath;
+    const hasTimestamp = !!(hasLog && exportConfig?.logTimestampLines);
+    const csvDir = hasCsv ? normalizePathForPython(exportConfig.outputFolderAbsPath) : '';
+    const logPath = hasLog ? normalizePathForPython(exportConfig.logFileAbsPath) : '';
+    const sampleRows = safeSampleRows(exportConfig?.sampleRows);
+    const captureArgs = [`_out=${v}`];
+    for (let i = 0; i < inputs.length; i++) {
+        captureArgs.push(`_in${i}=${inputs[i]}`);
     }
-    else if (hasLog && exportConfig?.logTimestampLines) {
-        // CSV disabled but timestamp lines requested
-        const logPath = exportConfig.logFileAbsPath.replace(/\\/g, '/').replace(/'/g, "\\'");
-        const v = assignment.varName;
-        parts.push(`{open('${logPath}', 'a').write(` +
+    const shapeOf = (arg) => `str(getattr(${arg}, 'shape', ('?','?'))[0]) + ' rows and ' + ` +
+        `str(getattr(${arg}, 'shape', ('?','?'))[1]) + ' columns'`;
+    const blockParts = [
+        pyStringExpr(`\n===DATALOG===\n${wrapSourceText(assignment.sourceText)}\n`),
+    ];
+    for (let i = 0; i < inputs.length; i++) {
+        blockParts.push(`('Input dataframe' if hasattr(_in${i}, 'shape') else 'Input lazyframe') + ` +
+            `${pyStringExpr(` "${inputs[i]}" has `)} + ${shapeOf(`_in${i}`)} + ${pyStringExpr('.\n')}`);
+    }
+    blockParts.push(`('New dataframe' if hasattr(_out, 'shape') else 'New lazyframe') + ` +
+        `${pyStringExpr(` "${v}" has `)} + ${shapeOf('_out')} + ${pyStringExpr('.')}`);
+    const timestampWrite = hasTimestamp
+        ? `__import__('builtins').open(${pyStringExpr(logPath)}, 'a').write(` +
             `__import__('datetime').datetime.now().strftime('[%H:%M:%S] ') + ` +
-            `'${v}: ' + str(${v}.shape[0]) + ' obs x ' + str(${v}.shape[1]) + ' vars\\n') ` +
-            `and '→ logged' if hasattr(${v}, 'shape') else ''}`);
-    }
-    // Break after the Code block so metadata stays on its own line
-    const [header, code, ...rest] = parts;
-    return `${header}${code}${rest.join(' ')}`;
+            `${pyStringExpr(`${v}: `)} + str(getattr(_out, 'shape', ('?','?'))[0]) + ` +
+            `${pyStringExpr(' obs x ')} + str(getattr(_out, 'shape', ('?','?'))[1]) + ` +
+            `${pyStringExpr(' vars\n')})`
+        : '0';
+    const blockWrite = hasLog
+        ? `__import__('builtins').open(${pyStringExpr(logPath)}, 'a').write(_block + '\\n')`
+        : '0';
+    const csvWrite = hasCsv
+        ? `((lambda _d=__import__('pathlib').Path(${pyStringExpr(csvDir)}): ` +
+            `(_d.mkdir(parents=True, exist_ok=True), ` +
+            `_out.head(${sampleRows}).write_csv(str(_d / ${pyStringExpr(`${v}.csv`)}))))() ` +
+            `if hasattr(_out, 'write_csv') else 0)`
+        : '0';
+    const blockExpr = blockParts.join(' + ');
+    const body = `(lambda _block=${blockExpr}: (` +
+        `${timestampWrite}, ${blockWrite}, ${csvWrite}, _block)[-1])()`;
+    return `{(lambda ${captureArgs.join(', ')}: ${body})()}`;
 }
-function buildPrintVarLogMessage(varName) {
-    return `\n===DATALOG=== ${varName}={repr(${varName})}`;
+function buildPrintVarLogMessage(varName, exportConfig) {
+    const hasLog = !!exportConfig?.logFileAbsPath;
+    const logPath = hasLog ? normalizePathForPython(exportConfig.logFileAbsPath) : '';
+    const blockExpr = `${pyStringExpr(`\n===DATALOG=== ${varName}=`)} + repr(_value)`;
+    const blockWrite = hasLog
+        ? `__import__('builtins').open(${pyStringExpr(logPath)}, 'a').write(_block + '\\n')`
+        : '0';
+    return `{(lambda _value=${varName}: (lambda _block=${blockExpr}: (` +
+        `${blockWrite}, _block)[-1])())()}`;
 }
 //# sourceMappingURL=sasFormatter.js.map

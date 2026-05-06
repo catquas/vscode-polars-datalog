@@ -57,7 +57,7 @@ export class LogpointManager implements vscode.Disposable {
       breakpoints.push(new vscode.SourceBreakpoint(
         new vscode.Location(uri, new vscode.Range(Math.min(pv.line, maxLine), 0, Math.min(pv.line, maxLine), 0)),
         true, undefined, undefined,
-        buildPrintVarLogMessage(pv.varName)
+        buildPrintVarLogMessage(pv.varName, exportConfig)
       ));
     }
 

@@ -11,6 +11,45 @@ let log: vscode.OutputChannel;
 let currentLogFilePath = '';
 let currentLogExtensionOutput = false;
 
+function getWorkspaceRoot(): vscode.Uri | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri;
+}
+
+function safeWorkspaceRelativeSetting(
+  cfg: vscode.WorkspaceConfiguration,
+  key: string,
+  defaultValue: string
+): string {
+  const raw = cfg.get<unknown>(key, defaultValue);
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return defaultValue;
+  }
+
+  const normalized = raw.replace(/\\/g, '/');
+  const isAbsolute = normalized.startsWith('/') ||
+    normalized.startsWith('//') ||
+    /^[A-Za-z]:\//.test(normalized);
+  const parts = normalized.split('/');
+  if (isAbsolute || parts.some(part => part === '' || part === '.' || part === '..')) {
+    logLine(`Ignoring unsafe vscode-datalog.${key} setting: ${raw}`);
+    return defaultValue;
+  }
+
+  return normalized;
+}
+
+function workspaceChildUri(key: string, defaultValue: string): vscode.Uri | undefined {
+  const wsRoot = getWorkspaceRoot();
+  if (!wsRoot) { return undefined; }
+  const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+  return vscode.Uri.joinPath(wsRoot, safeWorkspaceRelativeSetting(cfg, key, defaultValue));
+}
+
+function getSampleRows(): number {
+  const value = vscode.workspace.getConfiguration('vscode-datalog').get<unknown>('sampleRows', 1000);
+  return typeof value === 'number' && Number.isFinite(value) ? value : 1000;
+}
+
 /** Write to the Output Channel; also write to plog.log if logExtensionOutput is enabled. */
 function logLine(text: string): void {
   log.appendLine(text);
@@ -21,16 +60,11 @@ function logLine(text: string): void {
 }
 
 function resolveLogFilePath(): string {
-  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-  if (!wsRoot) { return ''; }
-  const logFile = vscode.workspace.getConfiguration('vscode-datalog').get<string>('logFile', 'plog.log');
-  return logFile ? vscode.Uri.joinPath(wsRoot, logFile).fsPath : '';
+  return workspaceChildUri('logFile', 'plog.log')?.fsPath ?? '';
 }
 
 function getConfig(): AnalyzerConfig & { enabled: boolean } & ExportConfig {
   const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-  const sampleOutputFolder = cfg.get<string>('sampleOutputFolder', 'worklib');
-  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
   currentLogFilePath = resolveLogFilePath();
   currentLogExtensionOutput = cfg.get<boolean>('logExtensionOutput', false);
   return {
@@ -38,8 +72,8 @@ function getConfig(): AnalyzerConfig & { enabled: boolean } & ExportConfig {
     dfNameSuffixes: cfg.get<string[]>('dfNameSuffixes', ['_df', 'df', '_data']),
     enabled: cfg.get<boolean>('enabled', true),
     exportSamples: cfg.get<boolean>('exportSamples', true),
-    sampleRows: cfg.get<number>('sampleRows', 1000),
-    outputFolderAbsPath: wsRoot ? vscode.Uri.joinPath(wsRoot, sampleOutputFolder).fsPath : '',
+    sampleRows: getSampleRows(),
+    outputFolderAbsPath: workspaceChildUri('sampleOutputFolder', 'worklib')?.fsPath ?? '',
     logFileAbsPath: currentLogFilePath,
     logTimestampLines: cfg.get<boolean>('logTimestampLines', false),
   };
@@ -172,14 +206,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('vscode-datalog.focusWorklib', async () => {
-      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (!wsRoot) {
+      const folderUri = workspaceChildUri('sampleOutputFolder', 'worklib');
+      if (!folderUri) {
         vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
         return;
       }
       const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-      const folder = cfg.get<string>('sampleOutputFolder', 'worklib');
-      const folderUri = vscode.Uri.joinPath(wsRoot, folder);
+      const folder = safeWorkspaceRelativeSetting(cfg, 'sampleOutputFolder', 'worklib');
       try {
         await vscode.workspace.fs.stat(folderUri);
       } catch {
@@ -191,50 +224,15 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // --- Capture logpoint output from Python debug sessions → plog.log ---
-  //
-  // Intercept DAP 'output' events for the '===DATALOG===' marker that
-  // logpoint expressions emit, writing those verbatim to plog.log.
-
-  context.subscriptions.push(
-    vscode.debug.registerDebugAdapterTrackerFactory('*', {
-      createDebugAdapterTracker(session: vscode.DebugSession) {
-        if (!isPythonSession(session)) { return undefined; }
-
-        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-        if (!wsRoot) { return undefined; }
-
-        const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-        const logFile = cfg.get<string>('logFile', 'plog.log');
-        if (!logFile) { return undefined; }
-        const logPath = vscode.Uri.joinPath(wsRoot, logFile).fsPath;
-
-        return {
-          onDidSendMessage(message: { type: string; event?: string; body?: { category?: string; output?: string } }): void {
-            if (message.type !== 'event' || message.event !== 'output') { return; }
-            const cat = message.body?.category ?? 'console';
-            const output = message.body?.output ?? '';
-            if (cat === 'stdout') {
-              try { require('fs').appendFileSync(logPath, output); } catch { /* ignore */ }
-            } else if (cat === 'console' && output.startsWith('===DATALOG===')) {
-              try { require('fs').appendFileSync(logPath, '\n\n' + output); } catch { /* ignore */ }
-            }
-          },
-        };
-      },
-    })
-  );
-
   context.subscriptions.push(
     vscode.commands.registerCommand('vscode-datalog.openPlog', async () => {
-      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (!wsRoot) {
+      const logUri = workspaceChildUri('logFile', 'plog.log');
+      if (!logUri) {
         vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
         return;
       }
       const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-      const logFile = cfg.get<string>('logFile', 'plog.log');
-      const logUri = vscode.Uri.joinPath(wsRoot, logFile);
+      const logFile = safeWorkspaceRelativeSetting(cfg, 'logFile', 'plog.log');
       try {
         await vscode.workspace.fs.stat(logUri);
       } catch {
@@ -259,14 +257,14 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showWarningMessage('Datalog: No variable name under cursor.');
         return;
       }
-      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (!wsRoot) {
+      const folderUri = workspaceChildUri('sampleOutputFolder', 'worklib');
+      if (!folderUri) {
         vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
         return;
       }
       const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-      const folder = cfg.get<string>('sampleOutputFolder', 'worklib');
-      const csvUri = vscode.Uri.joinPath(wsRoot, folder, `${varName}.csv`);
+      const folder = safeWorkspaceRelativeSetting(cfg, 'sampleOutputFolder', 'worklib');
+      const csvUri = vscode.Uri.joinPath(folderUri, `${varName}.csv`);
       try {
         await vscode.workspace.fs.stat(csvUri);
       } catch {
@@ -286,11 +284,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(plogBlue);
 
   function applyPlogDecorations(editor: vscode.TextEditor): void {
-    const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-    const logFile = cfg.get<string>('logFile', 'plog.log');
-    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!wsRoot || !logFile) { return; }
-    if (editor.document.uri.fsPath !== vscode.Uri.joinPath(wsRoot, logFile).fsPath) { return; }
+    const logUri = workspaceChildUri('logFile', 'plog.log');
+    if (!logUri) { return; }
+    if (editor.document.uri.fsPath !== logUri.fsPath) { return; }
 
     const ranges: vscode.Range[] = [];
     for (let i = 0; i < editor.document.lineCount; i++) {

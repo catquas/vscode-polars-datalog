@@ -41,7 +41,7 @@ class LogpointManager {
             breakpoints.push(new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Range(logLine, 0, logLine, 0)), true, undefined, undefined, logMessage));
         }
         for (const pv of printVars) {
-            breakpoints.push(new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Range(Math.min(pv.line, maxLine), 0, Math.min(pv.line, maxLine), 0)), true, undefined, undefined, (0, sasFormatter_1.buildPrintVarLogMessage)(pv.varName)));
+            breakpoints.push(new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Range(Math.min(pv.line, maxLine), 0, Math.min(pv.line, maxLine), 0)), true, undefined, undefined, (0, sasFormatter_1.buildPrintVarLogMessage)(pv.varName, exportConfig)));
         }
         this.managedBreakpoints.set(uri.toString(), breakpoints);
         vscode.debug.addBreakpoints(breakpoints);
