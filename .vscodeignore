@@ -1,6 +1,12 @@
 .vscode/**
 .vscode-test/**
+.claude/**
 src/**
+out/test/**
+out/**/*.map
 .gitignore
 tsconfig.json
 node_modules/**
+*.txt
+progress.md
+Ideas for future features.txt
