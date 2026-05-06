@@ -48,8 +48,7 @@ export class LogpointManager implements vscode.Disposable {
       const logMessage = buildLogMessage(assignment, exportConfig);
       breakpoints.push(new vscode.SourceBreakpoint(
         new vscode.Location(uri, new vscode.Range(logLine, 0, logLine, 0)),
-        true, undefined,
-        '1',        // fire once per debug session; debugpy traces multi-line expressions multiple times
+        true, undefined, undefined,
         logMessage
       ));
     }
@@ -57,7 +56,7 @@ export class LogpointManager implements vscode.Disposable {
     for (const pv of printVars) {
       breakpoints.push(new vscode.SourceBreakpoint(
         new vscode.Location(uri, new vscode.Range(Math.min(pv.line, maxLine), 0, Math.min(pv.line, maxLine), 0)),
-        true, undefined, '1',
+        true, undefined, undefined,
         buildPrintVarLogMessage(pv.varName)
       ));
     }
