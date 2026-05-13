@@ -139,6 +139,73 @@ function pyStringExpr(text: string): string {
   return parts.length > 0 ? parts.join(' + ') : "''";
 }
 
+const PRINT_DICT_ENTRY_LIMIT = 8;
+const PRINT_VALUE_ITEM_LIMIT = 5;
+
+const PRINT_VALUE_FORMATTER_SOURCE = `
+def _datalog_preview_seq(seq, limit):
+    try:
+        items = list(seq[:limit])
+    except Exception:
+        try:
+            items = list(seq)[:limit]
+        except Exception:
+            return repr(seq)
+    try:
+        total = len(seq)
+    except Exception:
+        total = len(items)
+    suffix = "" if total <= limit else ", ... " + str(total - limit) + " more items"
+    return "[" + ", ".join(repr(item) for item in items) + suffix + "]"
+
+def _datalog_preview_value(value):
+    if hasattr(value, "to_list") and not isinstance(value, (str, bytes, bytearray)):
+        name = getattr(value, "name", None)
+        try:
+            total = len(value)
+        except Exception:
+            total = "?"
+        try:
+            values = value.to_list()[:${PRINT_VALUE_ITEM_LIMIT}]
+        except Exception:
+            values = []
+        suffix = "" if total == "?" or total <= ${PRINT_VALUE_ITEM_LIMIT} else ", ... " + str(total - ${PRINT_VALUE_ITEM_LIMIT}) + " more items"
+        label = type(value).__name__
+        details = []
+        if name is not None:
+            details.append("name=" + repr(name))
+        details.append("len=" + str(total))
+        details.append("values=[" + ", ".join(repr(item) for item in values) + suffix + "]")
+        return label + "(" + ", ".join(details) + ")"
+    if isinstance(value, (list, tuple)):
+        open_ch, close_ch = ("[", "]") if isinstance(value, list) else ("(", ")")
+        preview = _datalog_preview_seq(value, ${PRINT_VALUE_ITEM_LIMIT})
+        return open_ch + preview[1:-1] + close_ch
+    return repr(value)
+
+def datalog_fmt(value):
+    if not isinstance(value, dict):
+        return repr(value)
+    items = list(value.items())
+    shown = items[:${PRINT_DICT_ENTRY_LIMIT}]
+    omitted = len(items) - ${PRINT_DICT_ENTRY_LIMIT}
+    lines = [chr(123)]
+    for idx, pair in enumerate(shown):
+        key, item = pair
+        comma = "," if idx < len(shown) - 1 or omitted > 0 else ""
+        lines.append("  " + repr(key) + ": " + _datalog_preview_value(item) + comma)
+    if omitted > 0:
+        lines.append("  ... " + str(omitted) + " more entries")
+    lines.append(chr(125))
+    return "\\n".join(lines)
+`.trim();
+
+function printValueFormatExpr(valueExpr: string): string {
+  return `(lambda _ns=dict(): (` +
+    `exec(${pyStringExpr(PRINT_VALUE_FORMATTER_SOURCE)}, _ns), ` +
+    `_ns[${pyStringExpr('datalog_fmt')}](${valueExpr}))[1])()`;
+}
+
 /**
  * Build a SAS-style logpoint message for a DataFrame assignment.
  *
@@ -206,7 +273,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
 export function buildPrintVarLogMessage(varName: string, exportConfig?: ExportConfig): string {
   const hasLog = !!exportConfig?.logFileAbsPath;
   const logPath = hasLog ? normalizePathForPython(exportConfig!.logFileAbsPath) : '';
-  const blockExpr = `${pyStringExpr(`\n===DATALOG=== ${varName}=`)} + repr(_value)`;
+  const blockExpr = `${pyStringExpr(`\n===DATALOG=== ${varName}=`)} + ${printValueFormatExpr('_value')}`;
   const blockWrite = hasLog
     ? `__import__('builtins').open(${pyStringExpr(logPath)}, 'a').write(_block + '\\n')`
     : '0';

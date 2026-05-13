@@ -231,6 +231,27 @@ const config = { polarsAlias: 'pl', dfNameSuffixes: ['_df', 'df', '_data'] };
         const r = (0, pythonAnalyzer_1.analyzeFile)(src, config);
         (0, runner_1.strictEqual)(r.length, 0);
     });
+    (0, runner_1.test)('function annotated in another open source is detected', () => {
+        const helperSrc = [
+            'def build_df() -> pl.DataFrame:',
+            '    return pl.DataFrame()',
+        ].join('\n');
+        const callerSrc = 'result = build_df()';
+        const sharedFuncs = (0, pythonAnalyzer_1.findDfReturningFunctions)(helperSrc, config);
+        const r = (0, pythonAnalyzer_1.analyzeFile)(callerSrc, config, sharedFuncs);
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'result');
+    });
+    (0, runner_1.test)('local annotations still work when shared functions are provided', () => {
+        const src = [
+            'def local_df() -> pl.DataFrame:',
+            '    return pl.DataFrame()',
+            'result = local_df()',
+        ].join('\n');
+        const r = (0, pythonAnalyzer_1.analyzeFile)(src, config, new Set(['external_df']));
+        (0, runner_1.strictEqual)(r.length, 1);
+        (0, runner_1.strictEqual)(r[0].varName, 'result');
+    });
 });
 (0, runner_1.suite)('analyzeFile — multi-line assignments', () => {
     (0, runner_1.test)('captures full range', () => {

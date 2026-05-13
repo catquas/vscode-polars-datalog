@@ -1,5 +1,5 @@
 import { suite, test, strictEqual, deepEqual, ok, notOk } from './runner';
-import { countNetBrackets, findInputVars, analyzeFile } from '../pythonAnalyzer';
+import { countNetBrackets, findInputVars, analyzeFile, findDfReturningFunctions } from '../pythonAnalyzer';
 
 const config = { polarsAlias: 'pl', dfNameSuffixes: ['_df', 'df', '_data'] };
 
@@ -263,6 +263,29 @@ suite('analyzeFile — annotated function return type', () => {
     ].join('\n');
     const r = analyzeFile(src, config);
     strictEqual(r.length, 0);
+  });
+
+  test('function annotated in another open source is detected', () => {
+    const helperSrc = [
+      'def build_df() -> pl.DataFrame:',
+      '    return pl.DataFrame()',
+    ].join('\n');
+    const callerSrc = 'result = build_df()';
+    const sharedFuncs = findDfReturningFunctions(helperSrc, config);
+    const r = analyzeFile(callerSrc, config, sharedFuncs);
+    strictEqual(r.length, 1);
+    strictEqual(r[0].varName, 'result');
+  });
+
+  test('local annotations still work when shared functions are provided', () => {
+    const src = [
+      'def local_df() -> pl.DataFrame:',
+      '    return pl.DataFrame()',
+      'result = local_df()',
+    ].join('\n');
+    const r = analyzeFile(src, config, new Set(['external_df']));
+    strictEqual(r.length, 1);
+    strictEqual(r[0].varName, 'result');
   });
 });
 

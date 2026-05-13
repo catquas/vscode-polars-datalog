@@ -193,6 +193,29 @@ function count(text, pattern) {
         (0, runner_1.strictEqual)(count(msg, /{/g), 1);
         (0, runner_1.strictEqual)(count(msg, /}/g), 1);
     });
+    (0, runner_1.test)('uses compact dictionary formatter instead of raw repr', () => {
+        const msg = (0, sasFormatter_1.buildPrintVarLogMessage)('dictydtic', withLogNoTimestamp);
+        (0, runner_1.includes)(msg, 'def datalog_fmt(value):');
+        (0, runner_1.includes)(msg, 'isinstance(value, dict)');
+        (0, runner_1.includes)(msg, '_datalog_preview_value(item)');
+        (0, runner_1.notIncludes)(msg, ' + repr(_value)');
+    });
+    (0, runner_1.test)('dictionary formatter limits entries and nested items', () => {
+        const msg = (0, sasFormatter_1.buildPrintVarLogMessage)('dictydtic');
+        (0, runner_1.includes)(msg, 'items[:8]');
+        (0, runner_1.includes)(msg, 'more entries');
+        (0, runner_1.includes)(msg, 'to_list()[:5]');
+        (0, runner_1.includes)(msg, 'values=[');
+        (0, runner_1.includes)(msg, 'more items');
+    });
+    (0, runner_1.test)('dictionary formatter emits few-line braces via chr to stay logpoint-safe', () => {
+        const msg = (0, sasFormatter_1.buildPrintVarLogMessage)('dictydtic');
+        (0, runner_1.strictEqual)(count(msg, /{/g), 1);
+        (0, runner_1.strictEqual)(count(msg, /}/g), 1);
+        (0, runner_1.includes)(msg, 'chr(123)');
+        (0, runner_1.includes)(msg, 'chr(125)');
+        (0, runner_1.includes)(msg, 'join(lines)');
+    });
 });
 (0, runner_1.suite)('buildLogMessage - Windows path normalisation', () => {
     (0, runner_1.test)('backslashes converted to forward slashes in CSV path', () => {

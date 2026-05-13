@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { analyzeFile, AnalyzerConfig, findPrintVarStatements } from './pythonAnalyzer';
+import { analyzeFile, AnalyzerConfig, findDfReturningFunctions, findPrintVarStatements } from './pythonAnalyzer';
 import { LogpointManager } from './logpointManager';
 import { ExportConfig } from './sasFormatter';
 
@@ -90,26 +90,64 @@ async function syncAllPythonEditors(): Promise<void> {
     return;
   }
 
-  const editors = vscode.window.visibleTextEditors.filter(
-    e => e.document.languageId === 'python'
-  );
+  const documents = getOpenWorkspacePythonDocuments();
+  const sources = documents.map(document => ({
+    document,
+    source: document.getText(),
+  }));
+  const dfReturningFuncs = collectOpenDfReturningFunctions(sources, config);
   const totalBps = vscode.debug.breakpoints.length;
   const purged = manager.purgeStale();
   logLine(`  → purgeStale: ${totalBps} total breakpoints, removed ${purged} stale`);
-  logLine(`Visible Python editors: ${editors.length}`);
+  logLine(`Open workspace Python documents: ${documents.length}`);
+  logLine(`Shared DataFrame-returning functions: ${dfReturningFuncs.size}`);
 
-  for (const editor of editors) {
-    await syncDocument(editor.document, config);
+  for (const { document, source } of sources) {
+    await syncDocument(document, config, source, dfReturningFuncs);
   }
+}
+
+function getOpenWorkspacePythonDocuments(): vscode.TextDocument[] {
+  const docs = new Map<string, vscode.TextDocument>();
+
+  for (const document of vscode.workspace.textDocuments) {
+    if (isOpenWorkspacePythonDocument(document)) {
+      docs.set(document.uri.toString(), document);
+    }
+  }
+
+  return [...docs.values()];
+}
+
+function isOpenWorkspacePythonDocument(document: vscode.TextDocument): boolean {
+  return document.languageId === 'python' &&
+    document.uri.scheme === 'file' &&
+    vscode.workspace.getWorkspaceFolder(document.uri) !== undefined;
+}
+
+function collectOpenDfReturningFunctions(
+  sources: Array<{ source: string }>,
+  config: AnalyzerConfig
+): Set<string> {
+  const funcs = new Set<string>();
+
+  for (const { source } of sources) {
+    for (const fn of findDfReturningFunctions(source, config)) {
+      funcs.add(fn);
+    }
+  }
+
+  return funcs;
 }
 
 async function syncDocument(
   document: vscode.TextDocument,
-  config: AnalyzerConfig & ExportConfig
+  config: AnalyzerConfig & ExportConfig,
+  source: string = document.getText(),
+  dfReturningFuncs: Set<string> = findDfReturningFunctions(source, config)
 ): Promise<void> {
-  const source = document.getText();
   const sourceLines = source.replace(/\r/g, '').split('\n');
-  const assignments = analyzeFile(source, config);
+  const assignments = analyzeFile(source, config, dfReturningFuncs);
   const printVars = findPrintVarStatements(source);
   logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s), ${printVars.length} print-var statement(s)`);
   for (const a of assignments) {
@@ -175,8 +213,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const activeSession = vscode.debug.activeDebugSession;
       if (activeSession && isPythonSession(activeSession)) {
-        logLine(`File saved, re-syncing: ${document.fileName}`);
-        await syncDocument(document, config);
+        logLine(`File saved, re-syncing open workspace Python documents: ${document.fileName}`);
+        await syncAllPythonEditors();
       }
     })
   );

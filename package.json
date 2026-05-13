@@ -2,7 +2,7 @@
   "name": "vscode-datalog",
   "displayName": "Datalog for Polars",
   "description": "Automatically places logpoints after Polars DataFrame assignments to show row/column counts SAS-style in the Debug Console",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "engines": {
     "vscode": "^1.92.0"
   },

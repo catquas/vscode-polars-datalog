@@ -78,19 +78,47 @@ async function syncAllPythonEditors() {
         logLine('Skipping sync — extension is disabled in settings.');
         return;
     }
-    const editors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === 'python');
+    const documents = getOpenWorkspacePythonDocuments();
+    const sources = documents.map(document => ({
+        document,
+        source: document.getText(),
+    }));
+    const dfReturningFuncs = collectOpenDfReturningFunctions(sources, config);
     const totalBps = vscode.debug.breakpoints.length;
     const purged = manager.purgeStale();
     logLine(`  → purgeStale: ${totalBps} total breakpoints, removed ${purged} stale`);
-    logLine(`Visible Python editors: ${editors.length}`);
-    for (const editor of editors) {
-        await syncDocument(editor.document, config);
+    logLine(`Open workspace Python documents: ${documents.length}`);
+    logLine(`Shared DataFrame-returning functions: ${dfReturningFuncs.size}`);
+    for (const { document, source } of sources) {
+        await syncDocument(document, config, source, dfReturningFuncs);
     }
 }
-async function syncDocument(document, config) {
-    const source = document.getText();
+function getOpenWorkspacePythonDocuments() {
+    const docs = new Map();
+    for (const document of vscode.workspace.textDocuments) {
+        if (isOpenWorkspacePythonDocument(document)) {
+            docs.set(document.uri.toString(), document);
+        }
+    }
+    return [...docs.values()];
+}
+function isOpenWorkspacePythonDocument(document) {
+    return document.languageId === 'python' &&
+        document.uri.scheme === 'file' &&
+        vscode.workspace.getWorkspaceFolder(document.uri) !== undefined;
+}
+function collectOpenDfReturningFunctions(sources, config) {
+    const funcs = new Set();
+    for (const { source } of sources) {
+        for (const fn of (0, pythonAnalyzer_1.findDfReturningFunctions)(source, config)) {
+            funcs.add(fn);
+        }
+    }
+    return funcs;
+}
+async function syncDocument(document, config, source = document.getText(), dfReturningFuncs = (0, pythonAnalyzer_1.findDfReturningFunctions)(source, config)) {
     const sourceLines = source.replace(/\r/g, '').split('\n');
-    const assignments = (0, pythonAnalyzer_1.analyzeFile)(source, config);
+    const assignments = (0, pythonAnalyzer_1.analyzeFile)(source, config, dfReturningFuncs);
     const printVars = (0, pythonAnalyzer_1.findPrintVarStatements)(source);
     logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s), ${printVars.length} print-var statement(s)`);
     for (const a of assignments) {
@@ -145,8 +173,8 @@ function activate(context) {
         }
         const activeSession = vscode.debug.activeDebugSession;
         if (activeSession && isPythonSession(activeSession)) {
-            logLine(`File saved, re-syncing: ${document.fileName}`);
-            await syncDocument(document, config);
+            logLine(`File saved, re-syncing open workspace Python documents: ${document.fileName}`);
+            await syncAllPythonEditors();
         }
     }));
     // --- Commands ---

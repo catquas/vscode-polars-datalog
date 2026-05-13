@@ -227,6 +227,32 @@ suite('buildPrintVarLogMessage', () => {
     strictEqual(count(msg, /{/g), 1);
     strictEqual(count(msg, /}/g), 1);
   });
+
+  test('uses compact dictionary formatter instead of raw repr', () => {
+    const msg = buildPrintVarLogMessage('dictydtic', withLogNoTimestamp);
+    includes(msg, 'def datalog_fmt(value):');
+    includes(msg, 'isinstance(value, dict)');
+    includes(msg, '_datalog_preview_value(item)');
+    notIncludes(msg, ' + repr(_value)');
+  });
+
+  test('dictionary formatter limits entries and nested items', () => {
+    const msg = buildPrintVarLogMessage('dictydtic');
+    includes(msg, 'items[:8]');
+    includes(msg, 'more entries');
+    includes(msg, 'to_list()[:5]');
+    includes(msg, 'values=[');
+    includes(msg, 'more items');
+  });
+
+  test('dictionary formatter emits few-line braces via chr to stay logpoint-safe', () => {
+    const msg = buildPrintVarLogMessage('dictydtic');
+    strictEqual(count(msg, /{/g), 1);
+    strictEqual(count(msg, /}/g), 1);
+    includes(msg, 'chr(123)');
+    includes(msg, 'chr(125)');
+    includes(msg, 'join(lines)');
+  });
 });
 
 suite('buildLogMessage - Windows path normalisation', () => {

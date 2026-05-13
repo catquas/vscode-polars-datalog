@@ -97,7 +97,8 @@ function escapeRegex(s: string): string {
  * and return their names. Handles multi-line signatures by searching backward from
  * the `->` annotation line to find the owning `def funcname(`.
  */
-function findDfReturningFunctions(lines: string[], config: AnalyzerConfig): Set<string> {
+export function findDfReturningFunctions(source: string, config: AnalyzerConfig): Set<string> {
+  const lines = source.replace(/\r/g, '').split('\n');
   const funcs = new Set<string>();
   const alias = escapeRegex(config.polarsAlias);
   const returnTypeRe = new RegExp(`->\\s*${alias}\\.(DataFrame|LazyFrame)`);
@@ -195,12 +196,19 @@ const ASSIGNMENT_RE = /^(\s*)([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$/;
 /**
  * Parse a Python source string and return all detected DataFrame assignments.
  */
-export function analyzeFile(source: string, config: AnalyzerConfig): DataFrameAssignment[] {
+export function analyzeFile(
+  source: string,
+  config: AnalyzerConfig,
+  externalDfReturningFuncs: Set<string> = new Set<string>()
+): DataFrameAssignment[] {
   // Strip \r to handle Windows line endings (\r\n)
   const lines = source.replace(/\r/g, '').split('\n');
   const results: DataFrameAssignment[] = [];
   const knownDfVars = new Set<string>();
-  const dfReturningFuncs = findDfReturningFunctions(lines, config);
+  const dfReturningFuncs = new Set([
+    ...externalDfReturningFuncs,
+    ...findDfReturningFunctions(source, config),
+  ]);
 
   let i = 0;
   while (i < lines.length) {

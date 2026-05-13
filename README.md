@@ -6,7 +6,7 @@ It is built for quick inspection while debugging Polars pipelines: column counts
 
 ## What It Does
 
-When a Python debug session starts, the extension scans visible Python editors and adds managed logpoints after detected DataFrame assignments. For example:
+When a Python debug session starts, the extension scans open Python files in the current workspace and adds managed logpoints after detected DataFrame assignments. For example:
 
 ```python
 result_df = input_df.filter(pl.col("age") > 25)
@@ -31,13 +31,13 @@ By default, the same DATALOG blocks are written to `plog.log`, and the first 100
 4. Open `plog.log` with `Ctrl+Alt+P`, or use the command palette: `Datalog: Open plog.log`.
 5. Open the sample CSV folder with `Ctrl+Alt+W`, or use `Datalog: Focus worklib Folder in Explorer`.
 
-The extension only scans visible Python editors, so keep the files you care about open when starting or refreshing a debug session.
+The extension scans open Python files in the workspace, so keep the files you care about open when starting or refreshing a debug session.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `Datalog: Refresh Logpoints` | Re-scan visible Python editors and recreate managed logpoints. |
+| `Datalog: Refresh Logpoints` | Re-scan open workspace Python files and recreate managed logpoints. |
 | `Datalog: Clear All Logpoints` | Remove all managed Datalog logpoints. |
 | `Datalog: Focus worklib Folder in Explorer` | Reveal the configured sample output folder in VS Code Explorer. |
 | `Datalog: Open plog.log` | Open the configured log file. |
@@ -89,6 +89,7 @@ Datalog detects assignments using a few practical heuristics:
 - Transformations chained from known DataFrame variables, such as `.filter()`, `.select()`, `.join()`, `.group_by()`, `.with_columns()`, and `.collect()`.
 - Subscript chains such as `libs["df"].filter(...)`.
 - Calls to functions annotated as returning `pl.DataFrame` or `pl.LazyFrame`.
+- Calls to annotated DataFrame-returning functions in another open Python file in the same workspace.
 
 ## Regular Python Variables
 

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.countNetBrackets = countNetBrackets;
 exports.findInputVars = findInputVars;
+exports.findDfReturningFunctions = findDfReturningFunctions;
 exports.findPrintVarStatements = findPrintVarStatements;
 exports.analyzeFile = analyzeFile;
 /**
@@ -86,7 +87,8 @@ function escapeRegex(s) {
  * and return their names. Handles multi-line signatures by searching backward from
  * the `->` annotation line to find the owning `def funcname(`.
  */
-function findDfReturningFunctions(lines, config) {
+function findDfReturningFunctions(source, config) {
+    const lines = source.replace(/\r/g, '').split('\n');
     const funcs = new Set();
     const alias = escapeRegex(config.polarsAlias);
     const returnTypeRe = new RegExp(`->\\s*${alias}\\.(DataFrame|LazyFrame)`);
@@ -164,12 +166,15 @@ const ASSIGNMENT_RE = /^(\s*)([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$/;
 /**
  * Parse a Python source string and return all detected DataFrame assignments.
  */
-function analyzeFile(source, config) {
+function analyzeFile(source, config, externalDfReturningFuncs = new Set()) {
     // Strip \r to handle Windows line endings (\r\n)
     const lines = source.replace(/\r/g, '').split('\n');
     const results = [];
     const knownDfVars = new Set();
-    const dfReturningFuncs = findDfReturningFunctions(lines, config);
+    const dfReturningFuncs = new Set([
+        ...externalDfReturningFuncs,
+        ...findDfReturningFunctions(source, config),
+    ]);
     let i = 0;
     while (i < lines.length) {
         const line = lines[i];
