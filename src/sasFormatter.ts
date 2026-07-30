@@ -1,4 +1,6 @@
 import { DataFrameAssignment } from './pythonAnalyzer';
+import { normalizePathForPython, pyStringExpr, safeCaptureExpr, safeFileStem } from './pyExpr';
+import { coerceLazyFrameMode, LazyFrameMode, runtimeCallExpr } from './pyRuntime';
 
 export interface ExportConfig {
   exportSamples: boolean;
@@ -6,6 +8,14 @@ export interface ExportConfig {
   outputFolderAbsPath: string;
   logFileAbsPath: string;
   logTimestampLines: boolean;
+  /**
+   * Absolute path of the generated Python runtime module. When empty (no
+   * writable temp folder) the builders fall back to a self-contained inline
+   * expression that reports DataFrame shapes only.
+   */
+  runtimeFileAbsPath?: string;
+  /** How much work is allowed to describe a LazyFrame. */
+  lazyFrames?: LazyFrameMode;
 }
 
 const WRAP_AT = 90;
@@ -93,51 +103,75 @@ function wrapSourceText(text: string): string {
   return text.split('\n').map(breakLongLine).join('\n');
 }
 
-function normalizePathForPython(path: string): string {
-  return path.replace(/\\/g, '/');
-}
-
 /**
- * Build a Python string expression without literal braces. VS Code logpoints
- * use braces as expression delimiters even when the brace appears in a Python
- * string literal, so source braces become chr(123)/chr(125) pieces.
+ * Build a SAS-style logpoint message for a DataFrame or LazyFrame assignment.
+ *
+ * The logpoint contains exactly one runtime expression. It captures the values
+ * it needs as lambda default arguments before Python resumes, hands them to the
+ * generated runtime module, and returns the block for the Debug Console.
  */
-function pyStringExpr(text: string): string {
-  const parts: string[] = [];
-  let current = '';
-
-  function flush(): void {
-    if (current.length > 0) {
-      parts.push(`'${current}'`);
-      current = '';
-    }
+export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: ExportConfig): string {
+  const runtimeFile = exportConfig?.runtimeFileAbsPath ?? '';
+  if (!runtimeFile) {
+    return buildInlineLogMessage(assignment, exportConfig);
   }
 
-  for (const ch of text) {
-    if (ch === '{') {
-      flush();
-      parts.push('chr(123)');
-    } else if (ch === '}') {
-      flush();
-      parts.push('chr(125)');
-    } else if (ch === '\\') {
-      current += '\\\\';
-    } else if (ch === "'") {
-      current += "\\'";
-    } else if (ch === '\n') {
-      current += '\\n';
-    } else if (ch === '\r') {
-      current += '\\r';
-    } else if (ch === '\t') {
-      current += '\\t';
-    } else {
-      current += ch;
-    }
+  const inputs = assignment.inputVars;
+  const captureArgs = [`_out=${safeCaptureExpr(assignment.captureExpr ?? assignment.varName)}`];
+  for (let i = 0; i < inputs.length; i++) {
+    captureArgs.push(`_in${i}=${safeCaptureExpr(inputs[i])}`);
   }
-  flush();
 
-  return parts.length > 0 ? parts.join(' + ') : "''";
+  const hasCsv = !!(exportConfig?.exportSamples && exportConfig.outputFolderAbsPath);
+  const inputPairs = inputs.map((name, i) => `(${pyStringExpr(name)}, _in${i})`).join(', ');
+  const payload = pyDict([
+    ['source', pyStringExpr(wrapSourceText(assignment.sourceText))],
+    ['location', pyStringExpr(assignment.location ?? '')],
+    ['out_name', pyStringExpr(assignment.varName)],
+    ['out', '_out'],
+    ['inputs', `[${inputPairs}]`],
+    ['log_path', pyStringExpr(normalizePathForPython(exportConfig?.logFileAbsPath ?? ''))],
+    ['csv_dir', pyStringExpr(hasCsv ? normalizePathForPython(exportConfig!.outputFolderAbsPath) : '')],
+    ['csv_name', pyStringExpr(safeFileStem(assignment.varName))],
+    ['sample_rows', String(safeSampleRows(exportConfig?.sampleRows))],
+    ['lazy_mode', pyStringExpr(coerceLazyFrameMode(exportConfig?.lazyFrames))],
+    ['timestamps', exportConfig?.logTimestampLines ? 'True' : 'False'],
+  ]);
+
+  return `{(lambda ${captureArgs.join(', ')}: ` +
+    `${runtimeCallExpr('datalog_emit', payload, runtimeFile)})()}`;
 }
+
+export function buildPrintVarLogMessage(varName: string, exportConfig?: ExportConfig): string {
+  const runtimeFile = exportConfig?.runtimeFileAbsPath ?? '';
+  if (!runtimeFile) {
+    return buildInlinePrintVarLogMessage(varName, exportConfig);
+  }
+
+  const payload = pyDict([
+    ['name', pyStringExpr(varName)],
+    ['value', '_value'],
+    ['log_path', pyStringExpr(normalizePathForPython(exportConfig?.logFileAbsPath ?? ''))],
+    ['lazy_mode', pyStringExpr(coerceLazyFrameMode(exportConfig?.lazyFrames))],
+    ['sample_rows', String(safeSampleRows(exportConfig?.sampleRows))],
+  ]);
+
+  return `{(lambda _value=${varName}: ` +
+    `${runtimeCallExpr('datalog_value', payload, runtimeFile)})()}`;
+}
+
+/** `dict(a=1, b=2)` — a dict literal would need braces, which logpoints eat. */
+function pyDict(entries: Array<[string, string]>): string {
+  return `dict(${entries.map(([key, value]) => `${key}=${value}`).join(', ')})`;
+}
+
+// ---------------------------------------------------------------------------
+// Fallback builders
+//
+// Used only when no runtime module could be written to disk. They keep the
+// pre-runtime behaviour: DataFrame shapes, CSV samples and log writes, but no
+// LazyFrame inspection and no error reporting.
+// ---------------------------------------------------------------------------
 
 const PRINT_DICT_ENTRY_LIMIT = 8;
 const PRINT_VALUE_ITEM_LIMIT = 5;
@@ -206,14 +240,10 @@ function printValueFormatExpr(valueExpr: string): string {
     `_ns[${pyStringExpr('datalog_fmt')}](${valueExpr}))[1])()`;
 }
 
-/**
- * Build a SAS-style logpoint message for a DataFrame assignment.
- *
- * The logpoint contains exactly one runtime expression. It captures all local
- * values as lambda default arguments before Python resumes, writes plog.log and
- * CSV samples as side effects, then returns the full block for the Debug Console.
- */
-export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: ExportConfig): string {
+export function buildInlineLogMessage(
+  assignment: DataFrameAssignment,
+  exportConfig?: ExportConfig
+): string {
   const v = assignment.varName;
   const inputs = assignment.inputVars;
   const hasCsv = !!(exportConfig?.exportSamples && exportConfig.outputFolderAbsPath);
@@ -223,7 +253,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   const logPath = hasLog ? normalizePathForPython(exportConfig!.logFileAbsPath) : '';
   const sampleRows = safeSampleRows(exportConfig?.sampleRows);
 
-  const captureArgs: string[] = [`_out=${v}`];
+  const captureArgs: string[] = [`_out=${assignment.captureExpr ?? v}`];
   for (let i = 0; i < inputs.length; i++) {
     captureArgs.push(`_in${i}=${inputs[i]}`);
   }
@@ -259,7 +289,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   const csvWrite = hasCsv
     ? `((lambda _d=__import__('pathlib').Path(${pyStringExpr(csvDir)}): ` +
       `(_d.mkdir(parents=True, exist_ok=True), ` +
-      `_out.head(${sampleRows}).write_csv(str(_d / ${pyStringExpr(`${v}.csv`)}))))() ` +
+      `_out.head(${sampleRows}).write_csv(str(_d / ${pyStringExpr(`${safeFileStem(v)}.csv`)}))))() ` +
       `if hasattr(_out, 'write_csv') else 0)`
     : '0';
 
@@ -270,7 +300,7 @@ export function buildLogMessage(assignment: DataFrameAssignment, exportConfig?: 
   return `{(lambda ${captureArgs.join(', ')}: ${body})()}`;
 }
 
-export function buildPrintVarLogMessage(varName: string, exportConfig?: ExportConfig): string {
+export function buildInlinePrintVarLogMessage(varName: string, exportConfig?: ExportConfig): string {
   const hasLog = !!exportConfig?.logFileAbsPath;
   const logPath = hasLog ? normalizePathForPython(exportConfig!.logFileAbsPath) : '';
   const blockExpr = `${pyStringExpr(`\n===DATALOG=== ${varName}=`)} + ${printValueFormatExpr('_value')}`;

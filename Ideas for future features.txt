@@ -6,3 +6,18 @@
 ✓ 4. Remove stuff about sending error messages to plog.log file, it does not work anyway, and maybe it is slowing it down?
 ✓ 5. Print statements which just have a variable name print to plog.log, in addition to terminal. Do not need to use tee, can just look at the print statement and get the value of the variable. For example, if the line is `print(username)`, then log should show `username="john_smith"`. If the line is print(maxquotient), log should show `maxquotient=234`.
 ✓ 6. Security review
+
+✓ 7. Row/column counts and CSV samples for lazyframes, not just dataframes (vscode-datalog.lazyFrames).
+✓ 8. Show where a lazy pipeline first breaks: ERROR lines with the real polars error at the assignment that caused it, coloured red in plog.log.
+✓ 9. Write output to temporary files that get pruned by age and deleted when VS Code closes (vscode-datalog.outputLocation).
+✓ 10. Pick up more dataframes: annotated assignments, tuple unpacking, self.attr targets, for-loop targets, backslash continuations, frame-annotated parameters, polars-only method chains on any receiver.
+✓ 11. Only place logpoints on lines where the value is really in scope, and report the ones that cannot be placed.
+✓ 12. "Datalog: Explain DataFrame Detection in This File" command to say why a df was or was not picked up.
+
+
+Not done yet:
+13. Diff two frames in the log (columns added/dropped, row count delta) between consecutive DATALOG blocks for the same variable.
+14. Hover a frame variable in the editor to see its last logged shape.
+15. A tree view of the DATALOG blocks for the current session, click to jump to the source line.
+16. Optional parquet instead of CSV for sample output, for wide frames.
+17. Warn when a logged lazyframe collect took longer than N ms, so slow stages are obvious.

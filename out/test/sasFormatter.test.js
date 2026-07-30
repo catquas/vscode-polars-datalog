@@ -1,12 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+// The fixtures in this file deliberately leave runtimeFileAbsPath unset, so the
+// suites below cover the self-contained inline fallback. The runtime-backed
+// output (the normal path) is covered by the last suites here and end to end
+// against real Polars in pyRuntime.test.ts.
 const runner_1 = require("./runner");
 const sasFormatter_1 = require("../sasFormatter");
+const pyRuntime_1 = require("../pyRuntime");
 const base = {
     varName: 'result_df',
     sourceText: 'result_df = input_df.filter(pl.col("age") > 25)',
     range: { startLine: 1, endLine: 1 },
     inputVars: ['input_df'],
+    logLine: 2,
 };
 const noExport = {
     exportSamples: false,
@@ -264,6 +270,116 @@ function count(text, pattern) {
         (0, runner_1.includes)(msg, "\\'age\\'");
         (0, runner_1.includes)(msg, "\\'salary\\'");
         (0, runner_1.includes)(msg, "\\'department\\'");
+    });
+});
+// ---------------------------------------------------------------------------
+// Runtime-backed output (the path used whenever a runtime module was written)
+// ---------------------------------------------------------------------------
+const withRuntime = {
+    exportSamples: true,
+    sampleRows: 1000,
+    outputFolderAbsPath: '/tmp/vscode-datalog/proj/worklib',
+    logFileAbsPath: '/tmp/vscode-datalog/proj/plog.log',
+    logTimestampLines: false,
+    runtimeFileAbsPath: '/tmp/vscode-datalog/proj/datalog_runtime.py',
+    lazyFrames: 'sample',
+};
+(0, runner_1.suite)('buildLogMessage - runtime path', () => {
+    (0, runner_1.test)('still a single logpoint brace pair', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, withRuntime);
+        (0, runner_1.strictEqual)(count(msg, /{/g), 1);
+        (0, runner_1.strictEqual)(count(msg, /}/g), 1);
+    });
+    (0, runner_1.test)('calls datalog_emit from the generated module', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, withRuntime);
+        (0, runner_1.includes)(msg, "'datalog_emit'");
+        (0, runner_1.includes)(msg, '/tmp/vscode-datalog/proj/datalog_runtime.py');
+    });
+    (0, runner_1.test)('caches the loaded module on builtins under a versioned name', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, withRuntime);
+        (0, runner_1.includes)(msg, pyRuntime_1.RUNTIME_CACHE_ATTR);
+        (0, runner_1.includes)(msg, "__import__('builtins')");
+    });
+    (0, runner_1.test)('does not inline the block text assembly', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, withRuntime);
+        (0, runner_1.notIncludes)(msg, "getattr(_out, 'shape'");
+        (0, runner_1.notIncludes)(msg, 'New dataframe');
+    });
+    (0, runner_1.test)('payload uses dict() so no braces leak into the message', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, withRuntime);
+        (0, runner_1.includes)(msg, 'dict(source=');
+        (0, runner_1.includes)(msg, 'lazy_mode=');
+        (0, runner_1.includes)(msg, "'sample'");
+    });
+    (0, runner_1.test)('source text is passed through for the block header', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withRuntime), 'result_df = input_df.filter');
+    });
+    (0, runner_1.test)('captures the assigned value without risking a NameError', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, withRuntime);
+        (0, runner_1.includes)(msg, "_out=locals().get('result_df', globals().get('result_df', NotImplemented))");
+    });
+    (0, runner_1.test)('captures each input var the same defensive way', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, withRuntime);
+        (0, runner_1.includes)(msg, "_in0=locals().get('input_df', globals().get('input_df', NotImplemented))");
+        (0, runner_1.includes)(msg, "inputs=[('input_df', _in0)]");
+    });
+    (0, runner_1.test)('attribute targets are read directly, not looked up by name', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)({ ...base, varName: 'self.raw_df', captureExpr: 'self.raw_df', inputVars: [] }, withRuntime);
+        (0, runner_1.includes)(msg, '_out=self.raw_df');
+        (0, runner_1.includes)(msg, "out_name='self.raw_df'");
+    });
+    (0, runner_1.test)('sample file name is sanitised from the variable name', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)({ ...base, varName: 'frames["train"]', captureExpr: 'frames["train"]', inputVars: [] }, withRuntime);
+        (0, runner_1.includes)(msg, "csv_name='frames_train'");
+    });
+    (0, runner_1.test)('source location travels with the payload', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)({ ...base, location: 'etl.py:42' }, withRuntime), "location='etl.py:42'");
+    });
+    (0, runner_1.test)('csv_dir is empty when sample export is disabled', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, { ...withRuntime, exportSamples: false });
+        (0, runner_1.includes)(msg, "csv_dir=''");
+    });
+    (0, runner_1.test)('lazyFrames mode falls back to sample when misconfigured', () => {
+        const cfg = { ...withRuntime, lazyFrames: 'nonsense' };
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, cfg), "lazy_mode='sample'");
+    });
+    (0, runner_1.test)('sampleRows is still clamped before reaching Python', () => {
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, { ...withRuntime, sampleRows: 1e12 });
+        (0, runner_1.includes)(msg, 'sample_rows=100000');
+    });
+    (0, runner_1.test)('timestamps flag is a Python boolean', () => {
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, { ...withRuntime, logTimestampLines: true }), 'timestamps=True');
+        (0, runner_1.includes)((0, sasFormatter_1.buildLogMessage)(base, withRuntime), 'timestamps=False');
+    });
+    (0, runner_1.test)('Windows paths are normalised for Python', () => {
+        const cfg = {
+            ...withRuntime,
+            runtimeFileAbsPath: 'C:\\Users\\user\\AppData\\Local\\Temp\\datalog_runtime.py',
+            logFileAbsPath: 'C:\\Users\\user\\plog.log',
+        };
+        const msg = (0, sasFormatter_1.buildLogMessage)(base, cfg);
+        (0, runner_1.notIncludes)(msg, '\\\\');
+        (0, runner_1.includes)(msg, 'C:/Users/user/plog.log');
+    });
+});
+(0, runner_1.suite)('buildPrintVarLogMessage - runtime path', () => {
+    (0, runner_1.test)('calls datalog_value with the captured value', () => {
+        const msg = (0, sasFormatter_1.buildPrintVarLogMessage)('customer_id', withRuntime);
+        (0, runner_1.includes)(msg, "'datalog_value'");
+        (0, runner_1.includes)(msg, '_value=customer_id');
+        (0, runner_1.includes)(msg, "name='customer_id'");
+    });
+    (0, runner_1.test)('single logpoint brace pair', () => {
+        const msg = (0, sasFormatter_1.buildPrintVarLogMessage)('customer_id', withRuntime);
+        (0, runner_1.strictEqual)(count(msg, /{/g), 1);
+        (0, runner_1.strictEqual)(count(msg, /}/g), 1);
+    });
+    (0, runner_1.test)('no longer inlines the formatter source', () => {
+        (0, runner_1.notIncludes)((0, sasFormatter_1.buildPrintVarLogMessage)('d', withRuntime), 'def datalog_fmt(value):');
+    });
+    (0, runner_1.test)('stays short enough for pydevd to recompile on every hit', () => {
+        (0, runner_1.ok)((0, sasFormatter_1.buildPrintVarLogMessage)('d', withRuntime).length < 600, 'print logpoint is compact');
+        (0, runner_1.ok)((0, sasFormatter_1.buildLogMessage)(base, withRuntime).length < 1200, 'frame logpoint is compact');
     });
 });
 //# sourceMappingURL=sasFormatter.test.js.map

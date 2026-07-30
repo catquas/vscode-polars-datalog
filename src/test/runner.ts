@@ -4,6 +4,7 @@ declare const process: { exit(code: number): never };
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 let currentSuite = '';
 
 export function suite(name: string, fn: () => void): void {
@@ -23,6 +24,11 @@ export function test(name: string, fn: () => void): void {
     console.error(`        ${msg}`);
     failed++;
   }
+}
+
+export function skip(reason: string): void {
+  console.log(`    ○ skipped: ${reason}`);
+  skipped++;
 }
 
 export function strictEqual<T>(actual: T, expected: T, label?: string): void {
@@ -66,6 +72,7 @@ export function notIncludes(haystack: string, needle: string): void {
 }
 
 export function report(): void {
-  console.log(`\n  ${passed} passing, ${failed} failing\n`);
+  const skipNote = skipped > 0 ? `, ${skipped} skipped` : '';
+  console.log(`\n  ${passed} passing, ${failed} failing${skipNote}\n`);
   if (failed > 0) { process.exit(1); }
 }
