@@ -1,8 +1,8 @@
 {
   "name": "vscode-datalog",
   "displayName": "Datalog for Polars",
-  "description": "Automatically places logpoints after Polars DataFrame assignments to show row/column counts SAS-style in the Debug Console",
-  "version": "0.1.1",
+  "description": "Automatically places logpoints after Polars DataFrame and LazyFrame assignments to show row/column counts SAS-style, surface the first error in a lazy pipeline, and export CSV samples",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.92.0"
   },
@@ -34,6 +34,14 @@
       {
         "command": "vscode-datalog.openCsvForVar",
         "title": "Datalog: Open CSV for Variable"
+      },
+      {
+        "command": "vscode-datalog.explainDetection",
+        "title": "Datalog: Explain DataFrame Detection in This File"
+      },
+      {
+        "command": "vscode-datalog.clearTempOutput",
+        "title": "Datalog: Clear Temporary Output"
       }
     ],
     "menus": {
@@ -69,7 +77,7 @@
           "type": "array",
           "items": { "type": "string" },
           "default": ["_df", "df", "_data"],
-          "description": "Variable name suffixes that identify a variable as a DataFrame"
+          "description": "Variable name suffixes that identify a variable as a DataFrame or LazyFrame"
         },
         "vscode-datalog.enabled": {
           "type": "boolean",
@@ -79,22 +87,22 @@
         "vscode-datalog.exportSamples": {
           "type": "boolean",
           "default": true,
-          "description": "Export the top rows of each DataFrame to a CSV file during debugging"
+          "description": "Export the top rows of each frame to a CSV file during debugging"
         },
         "vscode-datalog.sampleRows": {
           "type": "number",
           "default": 1000,
-          "description": "Number of rows to write per DataFrame sample CSV"
+          "description": "Number of rows to write per sample CSV, and the number collected from a LazyFrame in \"sample\" mode"
         },
         "vscode-datalog.sampleOutputFolder": {
           "type": "string",
           "default": "worklib",
-          "description": "Folder name (relative to workspace root) where DataFrame sample CSVs are written"
+          "description": "Folder name where frame sample CSVs are written, inside whichever location outputLocation selects"
         },
         "vscode-datalog.logFile": {
           "type": "string",
           "default": "plog.log",
-          "description": "File name (relative to workspace root) where Datalog appends runtime DataFrame shape entries"
+          "description": "File name where Datalog appends runtime frame entries, inside whichever location outputLocation selects"
         },
         "vscode-datalog.logExtensionOutput": {
           "type": "boolean",
@@ -105,6 +113,38 @@
           "type": "boolean",
           "default": false,
           "description": "Write a [HH:MM:SS] varname: N obs x M vars summary line before each DATALOG entry. Off by default."
+        },
+        "vscode-datalog.lazyFrames": {
+          "type": "string",
+          "enum": ["off", "schema", "count", "sample"],
+          "enumDescriptions": [
+            "Report LazyFrames without inspecting them.",
+            "Resolve the schema for the column count. Does not execute the query, and surfaces schema errors such as a misspelled column.",
+            "Resolve the schema and run a row count. Executes the query plan, but only aggregates.",
+            "Resolve the schema, count rows and collect the first sampleRows rows so LazyFrames also get a CSV sample."
+          ],
+          "default": "sample",
+          "description": "How much work Datalog may do to describe a LazyFrame. \"sample\" executes each logged query plan; drop to \"schema\" if that is too slow for your pipeline."
+        },
+        "vscode-datalog.outputLocation": {
+          "type": "string",
+          "enum": ["workspace", "temp"],
+          "enumDescriptions": [
+            "Write the log file and sample folder inside the workspace.",
+            "Write them to a per-workspace folder in the OS temp directory, pruned by age and deleted when VS Code closes."
+          ],
+          "default": "temp",
+          "description": "Where the log file and sample CSVs are written."
+        },
+        "vscode-datalog.tempRetentionHours": {
+          "type": "number",
+          "default": 12,
+          "description": "Delete temporary Datalog output older than this many hours when VS Code starts. Set to 0 to keep it until you clear it."
+        },
+        "vscode-datalog.deleteTempOnClose": {
+          "type": "boolean",
+          "default": true,
+          "description": "Delete this workspace's temporary Datalog output when VS Code closes. Only applies when outputLocation is \"temp\"."
         }
       }
     }

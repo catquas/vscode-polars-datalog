@@ -1,7 +1,33 @@
 import * as vscode from 'vscode';
-import { analyzeFile, AnalyzerConfig, findDfReturningFunctions, findPrintVarStatements } from './pythonAnalyzer';
+import {
+  analyzeSource,
+  AnalyzerConfig,
+  findDfReturningFunctions,
+  findPrintVarStatements,
+  formatDetectionReport,
+} from './pythonAnalyzer';
 import { LogpointManager } from './logpointManager';
 import { ExportConfig } from './sasFormatter';
+import {
+  coerceLazyFrameMode,
+  DATALOG_RUNTIME_SOURCE,
+  DEFAULT_LAZY_FRAME_MODE,
+  RUNTIME_FILE_NAME,
+} from './pyRuntime';
+import {
+  coerceOutputLocation,
+  DEFAULT_OUTPUT_LOCATION,
+  deleteInside,
+  ensureDir,
+  FileSystemLike,
+  joinPath,
+  OutputLocation,
+  pruneStaleEntries,
+  sessionDir,
+  tempRootDir,
+  workspaceKey,
+  writeFileIfChanged,
+} from './outputPaths';
 
 // Available at runtime in VS Code's Node.js extension host; not in @types/vscode
 declare function require(id: string): any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -10,6 +36,30 @@ let manager: LogpointManager;
 let log: vscode.OutputChannel;
 let currentLogFilePath = '';
 let currentLogExtensionOutput = false;
+/**
+ * Rewrite the runtime module even if its content is unchanged, so its mtime
+ * keeps the temp folder clear of age pruning while a session is using it.
+ */
+let forceRuntimeRewrite = true;
+
+interface DatalogConfig extends AnalyzerConfig, ExportConfig {
+  enabled: boolean;
+  outputLocation: OutputLocation;
+  tempRetentionHours: number;
+  deleteTempOnClose: boolean;
+}
+
+function fs(): FileSystemLike {
+  return require('fs');
+}
+
+function osTmpDir(): string {
+  try {
+    return require('os').tmpdir();
+  } catch {
+    return '';
+  }
+}
 
 function getWorkspaceRoot(): vscode.Uri | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -38,11 +88,36 @@ function safeWorkspaceRelativeSetting(
   return normalized;
 }
 
-function workspaceChildUri(key: string, defaultValue: string): vscode.Uri | undefined {
-  const wsRoot = getWorkspaceRoot();
-  if (!wsRoot) { return undefined; }
+function getOutputLocation(): OutputLocation {
   const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-  return vscode.Uri.joinPath(wsRoot, safeWorkspaceRelativeSetting(cfg, key, defaultValue));
+  return coerceOutputLocation(cfg.get<unknown>('outputLocation', DEFAULT_OUTPUT_LOCATION));
+}
+
+/** Per-workspace folder under the OS temp directory. */
+function currentSessionDir(): string {
+  const tmp = osTmpDir();
+  if (!tmp) { return ''; }
+  return sessionDir(tmp, getWorkspaceRoot()?.fsPath);
+}
+
+/**
+ * Absolute path for one of the workspace-relative settings, honouring
+ * vscode-datalog.outputLocation.
+ */
+function outputPath(key: string, defaultValue: string): string {
+  const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+  const relative = safeWorkspaceRelativeSetting(cfg, key, defaultValue);
+  if (getOutputLocation() === 'temp') {
+    const dir = currentSessionDir();
+    return dir ? joinPath(dir, relative) : '';
+  }
+  const wsRoot = getWorkspaceRoot();
+  return wsRoot ? vscode.Uri.joinPath(wsRoot, relative).fsPath : '';
+}
+
+function outputUri(key: string, defaultValue: string): vscode.Uri | undefined {
+  const path = outputPath(key, defaultValue);
+  return path ? vscode.Uri.file(path) : undefined;
 }
 
 function getSampleRows(): number {
@@ -50,7 +125,12 @@ function getSampleRows(): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 1000;
 }
 
-/** Write to the Output Channel; also write to plog.log if logExtensionOutput is enabled. */
+function getNumberSetting(key: string, defaultValue: number): number {
+  const value = vscode.workspace.getConfiguration('vscode-datalog').get<unknown>(key, defaultValue);
+  return typeof value === 'number' && Number.isFinite(value) ? value : defaultValue;
+}
+
+/** Write to the Output Channel; also write to the log file if enabled. */
 function logLine(text: string): void {
   log.appendLine(text);
   if (!currentLogFilePath || !currentLogExtensionOutput) { return; }
@@ -59,13 +139,29 @@ function logLine(text: string): void {
   } catch { /* ignore write errors */ }
 }
 
-function resolveLogFilePath(): string {
-  return workspaceChildUri('logFile', 'plog.log')?.fsPath ?? '';
+/**
+ * Write the Python runtime module the logpoints load. Keeping it on disk keeps
+ * logpoint expressions short — pydevd re-compiles the expression on every hit.
+ * Returns the absolute path, or '' when it could not be written.
+ */
+function ensureRuntimeFile(): string {
+  const dir = currentSessionDir();
+  if (!dir || !ensureDir(fs(), dir)) {
+    logLine('Could not create the Datalog temp folder; falling back to inline logpoints.');
+    return '';
+  }
+  const path = joinPath(dir, RUNTIME_FILE_NAME);
+  if (!writeFileIfChanged(fs(), path, DATALOG_RUNTIME_SOURCE, forceRuntimeRewrite)) {
+    logLine(`Could not write ${path}; falling back to inline logpoints.`);
+    return '';
+  }
+  forceRuntimeRewrite = false;
+  return path;
 }
 
-function getConfig(): AnalyzerConfig & { enabled: boolean } & ExportConfig {
+function getConfig(): DatalogConfig {
   const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-  currentLogFilePath = resolveLogFilePath();
+  currentLogFilePath = outputPath('logFile', 'plog.log');
   currentLogExtensionOutput = cfg.get<boolean>('logExtensionOutput', false);
   return {
     polarsAlias: cfg.get<string>('polarsAlias', 'pl'),
@@ -73,9 +169,14 @@ function getConfig(): AnalyzerConfig & { enabled: boolean } & ExportConfig {
     enabled: cfg.get<boolean>('enabled', true),
     exportSamples: cfg.get<boolean>('exportSamples', true),
     sampleRows: getSampleRows(),
-    outputFolderAbsPath: workspaceChildUri('sampleOutputFolder', 'worklib')?.fsPath ?? '',
+    outputFolderAbsPath: outputPath('sampleOutputFolder', 'worklib'),
     logFileAbsPath: currentLogFilePath,
     logTimestampLines: cfg.get<boolean>('logTimestampLines', false),
+    runtimeFileAbsPath: ensureRuntimeFile(),
+    lazyFrames: coerceLazyFrameMode(cfg.get<unknown>('lazyFrames', DEFAULT_LAZY_FRAME_MODE)),
+    outputLocation: getOutputLocation(),
+    tempRetentionHours: getNumberSetting('tempRetentionHours', 12),
+    deleteTempOnClose: cfg.get<boolean>('deleteTempOnClose', true),
   };
 }
 
@@ -100,7 +201,11 @@ async function syncAllPythonEditors(): Promise<void> {
   const purged = manager.purgeStale();
   logLine(`  → purgeStale: ${totalBps} total breakpoints, removed ${purged} stale`);
   logLine(`Open workspace Python documents: ${documents.length}`);
-  logLine(`Shared DataFrame-returning functions: ${dfReturningFuncs.size}`);
+  logLine(`Shared frame-returning functions: ${dfReturningFuncs.size}`);
+  logLine(`LazyFrame mode: ${config.lazyFrames}; output: ${config.outputLocation}`);
+  if (config.runtimeFileAbsPath) {
+    logLine(`Runtime module: ${config.runtimeFileAbsPath}`);
+  }
 
   for (const { document, source } of sources) {
     await syncDocument(document, config, source, dfReturningFuncs);
@@ -147,14 +252,52 @@ async function syncDocument(
   dfReturningFuncs: Set<string> = findDfReturningFunctions(source, config)
 ): Promise<void> {
   const sourceLines = source.replace(/\r/g, '').split('\n');
-  const assignments = analyzeFile(source, config, dfReturningFuncs);
+  const { assignments } = analyzeSource(source, config, dfReturningFuncs);
   const printVars = findPrintVarStatements(source);
-  logLine(`  ${document.fileName}: found ${assignments.length} DataFrame assignment(s), ${printVars.length} print-var statement(s)`);
+  logLine(`  ${document.fileName}: found ${assignments.length} frame assignment(s), ${printVars.length} print-var statement(s)`);
   for (const a of assignments) {
-    logLine(`    → ${a.varName} (lines ${a.range.startLine + 1}–${a.range.endLine + 1}), inputs: [${a.inputVars.join(', ')}]`);
+    logLine(`    → ${a.varName} (lines ${a.range.startLine + 1}–${a.range.endLine + 1}), inputs: [${a.inputVars.join(', ')}], ${a.reason ?? ''}`);
   }
-  await manager.syncForFile(document.uri, assignments, printVars, sourceLines, config);
+  const result = await manager.syncForFile(document.uri, assignments, printVars, sourceLines, config);
+  for (const skipped of result.skipped) {
+    logLine(`    ! ${skipped.varName} (line ${skipped.line}) not logged: ${skipped.reason}`);
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Temp output housekeeping
+// ---------------------------------------------------------------------------
+
+function pruneTempOutput(): void {
+  const tmp = osTmpDir();
+  if (!tmp) { return; }
+  const root = tempRootDir(tmp);
+  const hours = getNumberSetting('tempRetentionHours', 12);
+  if (hours <= 0) { return; }
+  const maxAgeMs = hours * 60 * 60 * 1000;
+  const now = Date.now();
+  const current = workspaceKey(getWorkspaceRoot()?.fsPath);
+
+  // Other workspaces' folders first, then anything stale inside our own.
+  const removedRoots = pruneStaleEntries(fs(), root, root, maxAgeMs, now, [current]);
+  const removedOwn = pruneStaleEntries(fs(), root, joinPath(root, current), maxAgeMs, now, [RUNTIME_FILE_NAME]);
+  const total = removedRoots.length + removedOwn.length;
+  if (total > 0) {
+    logLine(`Pruned ${total} Datalog temp entr${total === 1 ? 'y' : 'ies'} older than ${hours}h.`);
+  }
+}
+
+function clearTempOutput(): number {
+  const tmp = osTmpDir();
+  if (!tmp) { return 0; }
+  const root = tempRootDir(tmp);
+  const dir = joinPath(root, workspaceKey(getWorkspaceRoot()?.fsPath));
+  return deleteInside(fs(), root, dir) ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Activation
+// ---------------------------------------------------------------------------
 
 export function activate(context: vscode.ExtensionContext): void {
   log = vscode.window.createOutputChannel('Datalog');
@@ -164,12 +307,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(manager);
 
   // Resolve log file path and extension-output flag before first logLine call
-  currentLogFilePath = resolveLogFilePath();
+  currentLogFilePath = outputPath('logFile', 'plog.log');
   currentLogExtensionOutput = vscode.workspace.getConfiguration('vscode-datalog')
     .get<boolean>('logExtensionOutput', false);
 
   logLine('Datalog extension activated.');
   log.show(true); // show without stealing focus
+  pruneTempOutput();
 
   // --- Debug session lifecycle ---
 
@@ -181,8 +325,14 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       // Clear the log file so each run starts fresh
+      forceRuntimeRewrite = true;
+      currentLogFilePath = outputPath('logFile', 'plog.log');
       if (currentLogFilePath) {
-        try { require('fs').writeFileSync(currentLogFilePath, ''); } catch { /* ignore */ }
+        try {
+          const dir = currentLogFilePath.replace(/[/\\][^/\\]*$/, '');
+          ensureDir(fs(), dir);
+          require('fs').writeFileSync(currentLogFilePath, '');
+        } catch { /* ignore */ }
       }
       logLine(`Debug session started: type="${session.type}" name="${session.name}"`);
       logLine('  → Python session detected, syncing logpoints...');
@@ -244,17 +394,20 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('vscode-datalog.focusWorklib', async () => {
-      const folderUri = workspaceChildUri('sampleOutputFolder', 'worklib');
+      const folderUri = outputUri('sampleOutputFolder', 'worklib');
       if (!folderUri) {
-        vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
+        vscode.window.showWarningMessage('Datalog: No output folder is configured.');
         return;
       }
-      const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-      const folder = safeWorkspaceRelativeSetting(cfg, 'sampleOutputFolder', 'worklib');
       try {
         await vscode.workspace.fs.stat(folderUri);
       } catch {
-        vscode.window.showWarningMessage(`Datalog: Folder "${folder}" does not exist yet.`);
+        vscode.window.showWarningMessage(`Datalog: "${folderUri.fsPath}" does not exist yet. Run a debug session first.`);
+        return;
+      }
+      if (getOutputLocation() === 'temp') {
+        // Temp folders live outside the workspace, so the Explorer cannot reveal them.
+        await vscode.commands.executeCommand('revealFileInOS', folderUri);
         return;
       }
       await vscode.commands.executeCommand('workbench.view.explorer');
@@ -264,17 +417,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('vscode-datalog.openPlog', async () => {
-      const logUri = workspaceChildUri('logFile', 'plog.log');
+      const logUri = outputUri('logFile', 'plog.log');
       if (!logUri) {
-        vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
+        vscode.window.showWarningMessage('Datalog: No log file is configured.');
         return;
       }
-      const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-      const logFile = safeWorkspaceRelativeSetting(cfg, 'logFile', 'plog.log');
       try {
         await vscode.workspace.fs.stat(logUri);
       } catch {
-        vscode.window.showWarningMessage(`Datalog: "${logFile}" does not exist yet. Run a debug session first.`);
+        vscode.window.showWarningMessage(`Datalog: "${logUri.fsPath}" does not exist yet. Run a debug session first.`);
         return;
       }
       const doc = await vscode.workspace.openTextDocument(logUri);
@@ -295,21 +446,55 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showWarningMessage('Datalog: No variable name under cursor.');
         return;
       }
-      const folderUri = workspaceChildUri('sampleOutputFolder', 'worklib');
+      const folderUri = outputUri('sampleOutputFolder', 'worklib');
       if (!folderUri) {
-        vscode.window.showWarningMessage('Datalog: No workspace folder is open.');
+        vscode.window.showWarningMessage('Datalog: No output folder is configured.');
         return;
       }
-      const cfg = vscode.workspace.getConfiguration('vscode-datalog');
-      const folder = safeWorkspaceRelativeSetting(cfg, 'sampleOutputFolder', 'worklib');
       const csvUri = vscode.Uri.joinPath(folderUri, `${varName}.csv`);
       try {
         await vscode.workspace.fs.stat(csvUri);
       } catch {
-        vscode.window.showWarningMessage(`Datalog: No CSV found for "${varName}" in ${folder}/.`);
+        vscode.window.showWarningMessage(
+          `Datalog: No CSV found for "${varName}" in ${folderUri.fsPath}. ` +
+          'LazyFrames need vscode-datalog.lazyFrames set to "sample".'
+        );
         return;
       }
       await vscode.commands.executeCommand('vscode.open', csvUri);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('vscode-datalog.explainDetection', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'python') {
+        vscode.window.showWarningMessage('Datalog: Open a Python file first.');
+        return;
+      }
+      const config = getConfig();
+      const source = editor.document.getText();
+      const sources = getOpenWorkspacePythonDocuments().map(d => ({ source: d.getText() }));
+      const { assignments, candidates } = analyzeSource(
+        source,
+        config,
+        collectOpenDfReturningFunctions(sources, config)
+      );
+      log.show(true);
+      logLine('');
+      logLine(`Datalog detection report for ${editor.document.fileName}`);
+      logLine(formatDetectionReport(candidates, assignments));
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('vscode-datalog.clearTempOutput', () => {
+      const removed = clearTempOutput();
+      vscode.window.showInformationMessage(
+        removed > 0
+          ? 'Datalog: Temporary output folder deleted.'
+          : 'Datalog: No temporary output folder to delete.'
+      );
     })
   );
 
@@ -319,22 +504,31 @@ export function activate(context: vscode.ExtensionContext): void {
     light: { color: '#0070C1' },
     dark:  { color: '#4FC1FF' },
   });
-  context.subscriptions.push(plogBlue);
+  const plogRed = vscode.window.createTextEditorDecorationType({
+    light: { color: '#A31515', fontWeight: 'bold' },
+    dark:  { color: '#F48771', fontWeight: 'bold' },
+  });
+  context.subscriptions.push(plogBlue, plogRed);
 
   function applyPlogDecorations(editor: vscode.TextEditor): void {
-    const logUri = workspaceChildUri('logFile', 'plog.log');
-    if (!logUri) { return; }
-    if (editor.document.uri.fsPath !== logUri.fsPath) { return; }
+    const logPath = outputPath('logFile', 'plog.log');
+    if (!logPath) { return; }
+    if (editor.document.uri.fsPath !== vscode.Uri.file(logPath).fsPath) { return; }
 
-    const ranges: vscode.Range[] = [];
+    const shapes: vscode.Range[] = [];
+    const errors: vscode.Range[] = [];
     for (let i = 0; i < editor.document.lineCount; i++) {
-      const text = editor.document.lineAt(i).text;
-      if (text.startsWith('Input dataframe') || text.startsWith('New dataframe') ||
-          text.startsWith('Input lazyframe') || text.startsWith('New lazyframe')) {
-        ranges.push(editor.document.lineAt(i).range);
+      const line = editor.document.lineAt(i);
+      const text = line.text;
+      if (text.startsWith('ERROR')) {
+        errors.push(line.range);
+      } else if (/^(Input|New) (dataframe|lazyframe|value)\b/.test(text) ||
+                 /^(Input|New) "/.test(text)) {
+        shapes.push(line.range);
       }
     }
-    editor.setDecorations(plogBlue, ranges);
+    editor.setDecorations(plogBlue, shapes);
+    editor.setDecorations(plogRed, errors);
   }
 
   for (const editor of vscode.window.visibleTextEditors) {
@@ -357,5 +551,9 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  // manager and log disposed via context.subscriptions
+  const cfg = vscode.workspace.getConfiguration('vscode-datalog');
+  if (coerceOutputLocation(cfg.get<unknown>('outputLocation', DEFAULT_OUTPUT_LOCATION)) === 'temp' &&
+      cfg.get<boolean>('deleteTempOnClose', true)) {
+    clearTempOutput();
+  }
 }

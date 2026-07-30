@@ -1,12 +1,18 @@
+// The fixtures in this file deliberately leave runtimeFileAbsPath unset, so the
+// suites below cover the self-contained inline fallback. The runtime-backed
+// output (the normal path) is covered by the last suites here and end to end
+// against real Polars in pyRuntime.test.ts.
 import { suite, test, ok, includes, notIncludes, strictEqual } from './runner';
 import { buildLogMessage, buildPrintVarLogMessage, ExportConfig } from '../sasFormatter';
 import { DataFrameAssignment } from '../pythonAnalyzer';
+import { RUNTIME_CACHE_ATTR } from '../pyRuntime';
 
 const base: DataFrameAssignment = {
   varName: 'result_df',
   sourceText: 'result_df = input_df.filter(pl.col("age") > 25)',
   range: { startLine: 1, endLine: 1 },
   inputVars: ['input_df'],
+  logLine: 2,
 };
 
 const noExport: ExportConfig = {
@@ -311,5 +317,143 @@ suite('buildLogMessage - source line wrapping', () => {
     includes(msg, "\\'age\\'");
     includes(msg, "\\'salary\\'");
     includes(msg, "\\'department\\'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Runtime-backed output (the path used whenever a runtime module was written)
+// ---------------------------------------------------------------------------
+
+const withRuntime: ExportConfig = {
+  exportSamples: true,
+  sampleRows: 1000,
+  outputFolderAbsPath: '/tmp/vscode-datalog/proj/worklib',
+  logFileAbsPath: '/tmp/vscode-datalog/proj/plog.log',
+  logTimestampLines: false,
+  runtimeFileAbsPath: '/tmp/vscode-datalog/proj/datalog_runtime.py',
+  lazyFrames: 'sample',
+};
+
+suite('buildLogMessage - runtime path', () => {
+  test('still a single logpoint brace pair', () => {
+    const msg = buildLogMessage(base, withRuntime);
+    strictEqual(count(msg, /{/g), 1);
+    strictEqual(count(msg, /}/g), 1);
+  });
+
+  test('calls datalog_emit from the generated module', () => {
+    const msg = buildLogMessage(base, withRuntime);
+    includes(msg, "'datalog_emit'");
+    includes(msg, '/tmp/vscode-datalog/proj/datalog_runtime.py');
+  });
+
+  test('caches the loaded module on builtins under a versioned name', () => {
+    const msg = buildLogMessage(base, withRuntime);
+    includes(msg, RUNTIME_CACHE_ATTR);
+    includes(msg, "__import__('builtins')");
+  });
+
+  test('does not inline the block text assembly', () => {
+    const msg = buildLogMessage(base, withRuntime);
+    notIncludes(msg, "getattr(_out, 'shape'");
+    notIncludes(msg, 'New dataframe');
+  });
+
+  test('payload uses dict() so no braces leak into the message', () => {
+    const msg = buildLogMessage(base, withRuntime);
+    includes(msg, 'dict(source=');
+    includes(msg, 'lazy_mode=');
+    includes(msg, "'sample'");
+  });
+
+  test('source text is passed through for the block header', () => {
+    includes(buildLogMessage(base, withRuntime), 'result_df = input_df.filter');
+  });
+
+  test('captures the assigned value without risking a NameError', () => {
+    const msg = buildLogMessage(base, withRuntime);
+    includes(msg, "_out=locals().get('result_df', globals().get('result_df', NotImplemented))");
+  });
+
+  test('captures each input var the same defensive way', () => {
+    const msg = buildLogMessage(base, withRuntime);
+    includes(msg, "_in0=locals().get('input_df', globals().get('input_df', NotImplemented))");
+    includes(msg, "inputs=[('input_df', _in0)]");
+  });
+
+  test('attribute targets are read directly, not looked up by name', () => {
+    const msg = buildLogMessage(
+      { ...base, varName: 'self.raw_df', captureExpr: 'self.raw_df', inputVars: [] },
+      withRuntime
+    );
+    includes(msg, '_out=self.raw_df');
+    includes(msg, "out_name='self.raw_df'");
+  });
+
+  test('sample file name is sanitised from the variable name', () => {
+    const msg = buildLogMessage(
+      { ...base, varName: 'frames["train"]', captureExpr: 'frames["train"]', inputVars: [] },
+      withRuntime
+    );
+    includes(msg, "csv_name='frames_train'");
+  });
+
+  test('source location travels with the payload', () => {
+    includes(buildLogMessage({ ...base, location: 'etl.py:42' }, withRuntime), "location='etl.py:42'");
+  });
+
+  test('csv_dir is empty when sample export is disabled', () => {
+    const msg = buildLogMessage(base, { ...withRuntime, exportSamples: false });
+    includes(msg, "csv_dir=''");
+  });
+
+  test('lazyFrames mode falls back to sample when misconfigured', () => {
+    const cfg = { ...withRuntime, lazyFrames: 'nonsense' as unknown as 'sample' };
+    includes(buildLogMessage(base, cfg), "lazy_mode='sample'");
+  });
+
+  test('sampleRows is still clamped before reaching Python', () => {
+    const msg = buildLogMessage(base, { ...withRuntime, sampleRows: 1e12 });
+    includes(msg, 'sample_rows=100000');
+  });
+
+  test('timestamps flag is a Python boolean', () => {
+    includes(buildLogMessage(base, { ...withRuntime, logTimestampLines: true }), 'timestamps=True');
+    includes(buildLogMessage(base, withRuntime), 'timestamps=False');
+  });
+
+  test('Windows paths are normalised for Python', () => {
+    const cfg: ExportConfig = {
+      ...withRuntime,
+      runtimeFileAbsPath: 'C:\\Users\\user\\AppData\\Local\\Temp\\datalog_runtime.py',
+      logFileAbsPath: 'C:\\Users\\user\\plog.log',
+    };
+    const msg = buildLogMessage(base, cfg);
+    notIncludes(msg, '\\\\');
+    includes(msg, 'C:/Users/user/plog.log');
+  });
+});
+
+suite('buildPrintVarLogMessage - runtime path', () => {
+  test('calls datalog_value with the captured value', () => {
+    const msg = buildPrintVarLogMessage('customer_id', withRuntime);
+    includes(msg, "'datalog_value'");
+    includes(msg, '_value=customer_id');
+    includes(msg, "name='customer_id'");
+  });
+
+  test('single logpoint brace pair', () => {
+    const msg = buildPrintVarLogMessage('customer_id', withRuntime);
+    strictEqual(count(msg, /{/g), 1);
+    strictEqual(count(msg, /}/g), 1);
+  });
+
+  test('no longer inlines the formatter source', () => {
+    notIncludes(buildPrintVarLogMessage('d', withRuntime), 'def datalog_fmt(value):');
+  });
+
+  test('stays short enough for pydevd to recompile on every hit', () => {
+    ok(buildPrintVarLogMessage('d', withRuntime).length < 600, 'print logpoint is compact');
+    ok(buildLogMessage(base, withRuntime).length < 1200, 'frame logpoint is compact');
   });
 });

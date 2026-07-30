@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.suite = suite;
 exports.test = test;
+exports.skip = skip;
 exports.strictEqual = strictEqual;
 exports.deepEqual = deepEqual;
 exports.ok = ok;
@@ -11,6 +12,7 @@ exports.notIncludes = notIncludes;
 exports.report = report;
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 let currentSuite = '';
 function suite(name, fn) {
     currentSuite = name;
@@ -29,6 +31,10 @@ function test(name, fn) {
         console.error(`        ${msg}`);
         failed++;
     }
+}
+function skip(reason) {
+    console.log(`    ○ skipped: ${reason}`);
+    skipped++;
 }
 function strictEqual(actual, expected, label) {
     if (actual !== expected) {
@@ -63,7 +69,8 @@ function notIncludes(haystack, needle) {
     }
 }
 function report() {
-    console.log(`\n  ${passed} passing, ${failed} failing\n`);
+    const skipNote = skipped > 0 ? `, ${skipped} skipped` : '';
+    console.log(`\n  ${passed} passing, ${failed} failing${skipNote}\n`);
     if (failed > 0) {
         process.exit(1);
     }
